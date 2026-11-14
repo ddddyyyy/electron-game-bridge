@@ -1,0 +1,12 @@
+{
+  "name": "launcher-fixture",
+  "version": "1.0.0",
+  "main": "main.js",
+  "private": true,
+  "cpu": [
+    "x64"
+  ],
+  "devDependencies": {
+    "electron": "26.6.10"
+  }
+}

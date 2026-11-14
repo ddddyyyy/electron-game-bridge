@@ -1,0 +1,63 @@
+# Generic Electron Launcher
+
+一个本地 Electron 游戏启动器，使用 JavaScript/CommonJS、HTML/CSS 和原生 DOM。
+默认打开空游戏库；仓库不包含游戏、存档、预设安装目录或 Electron 二进制。
+目前支持 macOS，保留与 Electron 内置 Node 12 的共享代码兼容性，不要求迁移构建系统。
+
+## 启动
+
+自行准备可运行的原始 Electron macOS 发行包，然后指定管理界面的运行时：
+
+```sh
+LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command
+```
+
+也可将自备运行时放到本机 `runtime/Electron.app` 后双击脚本。`runtime/` 不进入 Git。
+管理器使用哪个 Electron 启动，与各游戏实际使用的运行时分别配置；无需 npm install。
+
+## 使用
+
+1. 在“运行时”入口选择本地 Electron.app 或可执行文件，探测并明确保存。
+2. 点击“添加游戏”，填写名称、安装目录和启动设置。图片可选；目录内有 resources/app.asar 时，默认入口 `.` 自动定位该归档。
+3. 程序识别所需精确版本并自动匹配已登记运行时，不提供手选版本下拉框。选择卡片后，在下方详情启动游戏。
+4. 游戏停止后才可编辑。点击保存才提交，关闭/取消不保存；独立保存的运行时登记单独生效。
+
+游戏使用自身的 Electron 主入口、窗口、preload 和初始化流程。启动器不注入引擎补丁或修改游戏包。
+版本证据来自 package.json 中精确的 dependencies/devDependencies.electron，或随附 Windows PE 程序的唯一 Electron 标记及架构。
+只有版本范围、游戏自身版本号、缺失或冲突的证据不会被猜成可用版本；缺少运行时应另行登记本地文件。
+不自动下载运行时，也不承诺兼容任意游戏或原生模块。
+
+## 数据与恢复
+
+- 游戏库配置：`.launcher/library.json`；最后有效备份：同目录 `.bak`。
+- 管理界面状态：`.launcher/ui-data`；每游戏默认 userData：`.launcher/games/<id>/userdata`。
+- 实际运行时绑定：`.launcher/games/<id>/runtime.json`。保存和启动均检查兼容性；未知旧数据或不兼容身份不会被重置、迁移或换目录。
+- 保存使用冲突检测和原子替换；显式恢复先保留故障原件，再恢复有效备份。
+- 日志：`logs/launcher.log` 及 `logs/games/<id>.log`。配置、日志、运行时、图片和存档属于本地资料，不应提交。
+
+游戏可能自行覆盖数据目录，因此 userData 参数不构成文件系统沙箱。接入实际游戏时应在隔离副本上确认其数据位置，尤其是跨平台存档语义。
+
+## 验证
+
+```sh
+node tests/core.test.js
+```
+
+同时使用自备 Electron 的 Node 模式验证共享代码：
+
+```sh
+ELECTRON_RUN_AS_NODE=1 '/path/to/Electron.app/Contents/MacOS/Electron' tests/core.test.js
+```
+
+图形回归只使用仓库自有合成应用，并从空游戏库开始：
+
+```sh
+LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command --library-smoke-test --test-root='/absolute/isolated/test-directory'
+```
+
+测试根必须与正式配置和已登记游戏目录分离。没有 npm test 或 lint 脚本。
+
+## 公开发布
+
+发布前运行 `node scripts/audit-publication.js`，检查全部可达 Git 历史的敏感路径、生成数据和常见凭据格式。
+审计不代替人工检查自定义秘密或第三方内容权利。隐私处理范围见 [公开发布记录](docs/PUBLICATION.md)，治理见 [Constitution](.specify/memory/constitution.md)。
