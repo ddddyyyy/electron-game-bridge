@@ -115,7 +115,7 @@
 - [X] T036 [P] 在 `README.md` 更新存档兼容的启用/确认/实际位置、备份与恢复、停用和程序回退说明，明确支持矩阵、首次备份并非周期备份、原游戏清档/刷新/重载保留及操作前备份、未知页面不获得文件能力，不承诺任意引擎或跨平台存档必然兼容。
 - [X] T037 [P] 在 `AGENTS.md` 同步实际已实现边界、真实可用检查入口和未完成验收状态，保留手动约束；不把规划或合成测试描述成真实游戏已通过，不引入新技术栈。
 - [X] T038 汇总 `specs/002-engine-save-compat/validation.md` 的接入门槛、核心/Node 12、UI 双版本及 SC-001—SC-007 证据，只补跑后续变更影响的检查；逐项确认 `specs/002-engine-save-compat/quickstart.md` 可复现，保留不可执行项及限制。
-- [ ] T039 执行 `git diff --check` 与 `node scripts/audit-publication.js`，审查新增适配、夹具和 `specs/002-engine-save-compat/validation.md` 不含私人目录、真实存档/截图/游戏源码或凭据；审计在当前变更提交后须覆盖新增可达提交，记录结果，不自动推送。
+- [X] T039 执行 `git diff --check` 与 `node scripts/audit-publication.js`，审查新增适配、夹具和 `specs/002-engine-save-compat/validation.md` 不含私人目录、真实存档/截图/游戏源码或凭据；审计在当前变更提交后须覆盖新增可达提交，记录结果，不自动推送。
 
 ## Dependencies & execution order
 
