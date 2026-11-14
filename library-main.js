@@ -59,7 +59,7 @@ function start(context,options) {
       },
       saveGame:async input=>{
         if(!config.object(input)||!config.object(input.game))throw config.failure('INPUT_INVALID','缺少游戏记录');
-        if(Object.prototype.hasOwnProperty.call(input.game,'runtimeId'))throw config.failure('INPUT_INVALID','运行时由程序自动匹配，不接受手选版本');
+        if(Object.prototype.hasOwnProperty.call(input.game,'runtimeId'))throw config.failure('INPUT_INVALID','运行环境由程序自动匹配，不接受手选版本');
         const state=store.read();if(state.error)throw config.failure(state.error.code,state.error.message);
         const game=Object.assign({},input.game);
         if(!game.id)game.id='game-'+require('crypto').randomBytes(8).toString('hex');
@@ -67,7 +67,7 @@ function start(context,options) {
         if(existing)game.runtimeId=existing.runtimeId;
         const resolved=resolveRuntime(game,state.library);
         const actual=await inspectRuntime(resolved.runtime.executablePath);
-        if(['version','arch','platform','fingerprint'].some(k=>actual[k]!==resolved.runtime[k]))throw config.failure('RUNTIME_MISMATCH','运行时文件已改变，请独立登记新记录');
+        if(['version','arch','platform','fingerprint'].some(k=>actual[k]!==resolved.runtime[k]))throw config.failure('RUNTIME_MISMATCH','运行环境文件已改变，请独立登记新记录');
         game.runtimeId=resolved.runtime.id;
         const fields=config.validateGame(game,state.library,adapters.metadata);
         if(Object.keys(fields).length)throw config.failure('GAME_INVALID','请修正游戏设置',fields);
@@ -78,8 +78,8 @@ function start(context,options) {
         store.saveGame(Object.assign({},input,{game}));return Object.assign(snapshot(),{savedGameId:game.id});
       },
       saveRuntime:async input=>{
-        if(!config.object(input)||!config.object(input.runtime))throw config.failure('INPUT_INVALID','缺少运行时记录');
-        if(input.runtime.id!==undefined)throw config.failure('RUNTIME_IMMUTABLE','运行时身份不可修改，新登记由程序生成新身份');
+        if(!config.object(input)||!config.object(input.runtime))throw config.failure('INPUT_INVALID','缺少运行环境记录');
+        if(input.runtime.id!==undefined)throw config.failure('RUNTIME_IMMUTABLE','运行环境身份不可修改，新登记由程序生成新身份');
         const runtime=Object.assign({},await inspectRuntime(input.runtime.executablePath),{id:input.runtime.id,source:input.runtime.source||input.runtime.executablePath});
         if(runner.busy)throw config.failure('ALREADY_RUNNING','游戏运行中不能保存');
         const state=store.saveRuntime(Object.assign({},input,{runtime}));return Object.assign(snapshot(),{savedRuntimeId:state.library.runtimes[state.library.runtimes.length-1].id});

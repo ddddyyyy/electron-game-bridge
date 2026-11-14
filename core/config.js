@@ -17,13 +17,13 @@ function inside(parent, child) {
 function sha(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
 function runtimeErrors(r) {
   const e = {};
-  if (!object(r)) return { runtime: '运行时记录必须为对象' };
-  if (!id(r.id)) e.id = '无效运行时身份';
+  if (!object(r)) return { runtime: '运行环境记录必须为对象' };
+  if (!id(r.id)) e.id = '无效运行环境身份';
   if (typeof r.executablePath !== 'string' || !path.isAbsolute(r.executablePath)) e.executablePath = '请选择绝对可执行文件路径';
   if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(r.version || '')) e.version = '缺少实际版本';
   if (!['x64', 'arm64'].includes(r.arch) || r.platform !== 'darwin') e.arch = '只支持可运行的 macOS Electron';
   if (typeof r.source !== 'string' || !r.source || r.source.length > 4096) e.source = '请提供有效来源说明';
-  if (!/^[a-f0-9]{64}$/.test(r.fingerprint || '')) e.fingerprint = '缺少运行时指纹';
+  if (!/^[a-f0-9]{64}$/.test(r.fingerprint || '')) e.fingerprint = '缺少运行环境指纹';
   return e;
 }
 function validateGame(g, lib, metadata) {
@@ -34,7 +34,7 @@ function validateGame(g, lib, metadata) {
   const adapter = Object.prototype.hasOwnProperty.call(metadata, g.adapterId) ? metadata[g.adapterId] : null;
   if (!adapter) e.adapterId = '不支持的适配方式';
   const r = lib.runtimes.find(x => object(x) && x.id === g.runtimeId);
-  if (!r || lib.runtimes.filter(x => object(x) && x.id === g.runtimeId).length !== 1 || Object.keys(runtimeErrors(r)).length) e.runtimeId = '未找到有效的自动匹配运行时，请修复登记';
+  if (!r || lib.runtimes.filter(x => object(x) && x.id === g.runtimeId).length !== 1 || Object.keys(runtimeErrors(r)).length) e.runtimeId = '未找到有效的自动匹配运行环境，请修复登记';
   if (typeof g.installPath !== 'string' || !path.isAbsolute(g.installPath)) e.installPath = '安装目录须为绝对路径';
   else {
     if (lib.games.some(x => object(x) && x.id !== g.id && typeof x.installPath === 'string' && canonical(x.installPath) === canonical(g.installPath))) e.installPath = '安装目录已登记（含符号链接别名）';
@@ -141,7 +141,7 @@ function createStore(directory, defaults, metadata, io) {
       if (old.runtimeId !== game.runtimeId) {
         const a = library.runtimes.find(r => r.id === old.runtimeId), b = library.runtimes.find(r => r.id === game.runtimeId);
         const data = path.join(directory, 'games', old.id, 'userdata');
-        if (io.existsSync(data) && io.readdirSync(data).length && (!a || !b || ['version','arch','fingerprint'].some(k => a[k] !== b[k]))) throw failure('RUNTIME_DATA_INCOMPATIBLE', '已有运行数据的游戏不能切换未验证运行时，原配置与数据已保留');
+        if (io.existsSync(data) && io.readdirSync(data).length && (!a || !b || ['version','arch','fingerprint'].some(k => a[k] !== b[k]))) throw failure('RUNTIME_DATA_INCOMPATIBLE', '已有运行数据的游戏不能切换未验证运行环境，原配置与数据已保留');
       }
       library.games[index] = game;
     } else library.games.push(game);
@@ -152,10 +152,10 @@ function createStore(directory, defaults, metadata, io) {
     const runtime = Object.assign({}, request.runtime);
     if (!runtime.id) runtime.id = 'runtime-' + crypto.randomBytes(8).toString('hex');
     const fields = runtimeErrors(runtime);
-    if (Object.keys(fields).length) throw failure('RUNTIME_INVALID', '运行时记录无效', fields);
+    if (Object.keys(fields).length) throw failure('RUNTIME_INVALID', '运行环境记录无效', fields);
     const old = library.runtimes.find(r => r && r.id === runtime.id);
     if (old) {
-      if (['executablePath','version','arch','platform','fingerprint'].some(k => old[k] !== runtime[k])) throw failure('RUNTIME_IMMUTABLE', '运行时身份不可原位修改，请作为新运行时登记');
+      if (['executablePath','version','arch','platform','fingerprint'].some(k => old[k] !== runtime[k])) throw failure('RUNTIME_IMMUTABLE', '运行环境身份不可原位修改，请作为新运行环境登记');
       return state;
     }
     library.runtimes.push(runtime);

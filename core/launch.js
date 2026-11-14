@@ -39,10 +39,10 @@ async function inspectRuntime(input, execute) {
   const os = require('os');
   const config = require('./config');
   let executablePath = input;
-  if (typeof input !== 'string' || !path.isAbsolute(input)) throw failure('RUNTIME_UNAVAILABLE','请选择本地运行时绝对路径');
+  if (typeof input !== 'string' || !path.isAbsolute(input)) throw failure('RUNTIME_UNAVAILABLE','请选择本地运行环境绝对路径');
   if (input.endsWith('.app')) executablePath = path.join(input, 'Contents/MacOS/Electron');
   try { executablePath = fs.realpathSync(executablePath); fs.accessSync(executablePath,fs.constants.X_OK); if (!fs.statSync(executablePath).isFile()) throw Error('不是文件'); }
-  catch (error) { throw failure('RUNTIME_UNAVAILABLE','运行时不可执行：'+error.message); }
+  catch (error) { throw failure('RUNTIME_UNAVAILABLE','运行环境不可执行：'+error.message); }
   const fingerprint = config.sha(fs.readFileSync(executablePath));
   const temp = fs.mkdtempSync(path.join(os.tmpdir(),'launcher-probe-'));
   try {
@@ -50,14 +50,14 @@ async function inspectRuntime(input, execute) {
       (execute || require('child_process').execFile)(executablePath,
         ['--user-data-dir='+temp, path.join(__dirname,'runtime-probe'), '--probe-data='+temp],
         { env:cleanEnv(process.env), timeout:10000, maxBuffer:64*1024, killSignal:'SIGKILL' },
-        (error,out) => error ? reject(failure(error.killed ? 'RUNTIME_PROBE_TIMEOUT' : 'RUNTIME_UNAVAILABLE',error.killed ? '运行时探测超时' : '运行时探测失败：'+error.message)) : resolve(out));
+        (error,out) => error ? reject(failure(error.killed ? 'RUNTIME_PROBE_TIMEOUT' : 'RUNTIME_UNAVAILABLE',error.killed ? '运行环境探测超时' : '运行环境探测失败：'+error.message)) : resolve(out));
     });
     const line = stdout.split(/\r?\n/).find(l=>l.startsWith('LAUNCHER_RUNTIME:'));
-    if (!line) throw failure('RUNTIME_UNAVAILABLE','无法识别 Electron 运行时；请选择原始 Electron 发行包');
+    if (!line) throw failure('RUNTIME_UNAVAILABLE','无法识别 Electron 运行环境；请选择原始 Electron 发行包');
     let info;
-    try { info = JSON.parse(line.slice(17)); } catch (_) { throw failure('RUNTIME_UNAVAILABLE','运行时探针结果无效'); }
+    try { info = JSON.parse(line.slice(17)); } catch (_) { throw failure('RUNTIME_UNAVAILABLE','运行环境探针结果无效'); }
     const runtime = Object.assign({},info,{executablePath,fingerprint,source:input});
-    if (Object.keys(config.runtimeErrors(Object.assign({id:'probe'},runtime))).length) throw failure('RUNTIME_UNAVAILABLE','运行时版本或平台不支持');
+    if (Object.keys(config.runtimeErrors(Object.assign({id:'probe'},runtime))).length) throw failure('RUNTIME_UNAVAILABLE','运行环境版本或平台不支持');
     return runtime;
   } finally { try { removeTree(temp); } catch (_) { /* 已退出探针的临时目录可能暂被系统占用。 */ } }
 }
@@ -73,7 +73,7 @@ class Runner extends require('events') {
       const fields=validateGame(game,{games:[game],runtimes:[runtime]},adapters.metadata);
       if(Object.keys(fields).length) throw failure('GAME_INVALID','游戏配置无效',fields);
       const actual=await this.probe(runtime.executablePath);
-      if(['version','arch','platform','fingerprint'].some(k=>actual[k]!==runtime[k])) throw failure('RUNTIME_MISMATCH','运行时文件/版本已变化，请登记新记录');
+      if(['version','arch','platform','fingerprint'].some(k=>actual[k]!==runtime[k])) throw failure('RUNTIME_MISMATCH','运行环境文件/版本已变化，请登记新记录');
       const resolved=resolveRuntime(game,{runtimes:[runtime]});
       checkDataRuntime(game,actual,context);
       const descriptor=adapters.describe(game,runtime,context);
@@ -113,7 +113,7 @@ function resolveRuntime(game,library) {
   const requirement=require('../adapters').runtimeRequirement(game);
   const candidates=library.runtimes.filter(r=>config.object(r)&&!Object.keys(config.runtimeErrors(r)).length&&r.version===requirement.version&&r.arch===requirement.arch&&r.platform===process.platform);
   candidates.sort((a,b)=>a.id===game.runtimeId?-1:b.id===game.runtimeId?1:a.id<b.id?-1:a.id>b.id?1:0);
-  if(!candidates.length)throw failure('RUNTIME_MISSING','需要 Electron '+requirement.version+' / '+requirement.arch+'，请在运行时入口独立登记本地文件后重试自动匹配');
+  if(!candidates.length)throw failure('RUNTIME_MISSING','需要 Electron '+requirement.version+' / '+requirement.arch+'，请在运行环境入口独立登记本地文件后重试自动匹配');
   return {requirement,runtime:candidates[0]};
 }
 function runtimeIdentity(runtime) {return {version:runtime.version,arch:runtime.arch,platform:runtime.platform,fingerprint:runtime.fingerprint};}
@@ -124,9 +124,9 @@ function checkDataRuntime(game,runtime,context) {
   const binding=bindingPath(game,context),identity=runtimeIdentity(runtime);
   if(fs.existsSync(binding)) {
     let old;try{old=JSON.parse(fs.readFileSync(binding,'utf8'));}catch(_){throw failure('RUNTIME_DATA_INCOMPATIBLE','运行数据的版本记录损坏，原数据已保留');}
-    if(!old||Object.keys(identity).some(k=>old[k]!==identity[k])||old.dataPath!==canonical(descriptor.userData))throw failure('RUNTIME_DATA_INCOMPATIBLE','已有数据绑定与运行时或数据目录不兼容，原配置与数据已保留');
+    if(!old||Object.keys(identity).some(k=>old[k]!==identity[k])||old.dataPath!==canonical(descriptor.userData))throw failure('RUNTIME_DATA_INCOMPATIBLE','已有数据绑定与运行环境或数据目录不兼容，原配置与数据已保留');
   } else if(fs.existsSync(descriptor.userData)&&fs.readdirSync(descriptor.userData).length) {
-    throw failure('RUNTIME_DATA_INCOMPATIBLE','已有数据缺少可验证运行时绑定，不能猜测或重置');
+    throw failure('RUNTIME_DATA_INCOMPATIBLE','已有数据缺少可验证运行环境绑定，不能猜测或重置');
   }
 }
 Object.assign(module.exports,{resolveRuntime,checkDataRuntime,runtimeIdentity});

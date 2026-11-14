@@ -27,7 +27,7 @@ function render(){
   if(game){
     art($('detail-art'),game,state.library.games.indexOf(game));$('detail-title').textContent=game.name||'名称待修复';$('detail-path').textContent=game.installPath||'安装位置待修复';
     const runtime=state.library.runtimes.find(r=>r&&r.id===game.runtimeId);
-    $('detail-runtime').textContent=runtime?'Electron '+runtime.version+' · '+runtime.arch:'运行时需修复';
+    $('detail-runtime').textContent=runtime?'Electron '+runtime.version+' · '+runtime.arch:'运行环境需修复';
     $('game-status').textContent=busy?'游戏进程处理中':state.errors.some(e=>e.gameId===game.id)?'配置待修复':'本地配置已登记';
   }
   renderRuntimes();setBusy(busy);
@@ -92,11 +92,11 @@ document.querySelectorAll('[data-pick]').forEach(button=>button.onclick=async()=
 });
 $('choose-runtime').onclick=async()=>{try{const p=await window.launcher.choosePath('runtime');if(p)$('runtime-path').value=p;}catch(error){fail(error);}};
 $('runtime-form').onsubmit=async event=>{
-  event.preventDefault();if(busy||registering)return;registering=true;setBusy(busy);$('runtime-status').textContent='正在探测本地运行时…';
+  event.preventDefault();if(busy||registering)return;registering=true;setBusy(busy);$('runtime-status').textContent='正在检测 Electron 版本…';
   try{const runtime=await window.launcher.inspectRuntime($('runtime-path').value.trim());runtime.source=$('runtime-source').value.trim()||runtime.source;
     const next=await window.launcher.saveRuntime({revision:state.library.revision,token:state.token,runtime});
     // Refresh our own revision without replacing any unsaved game inputs.
-    state=next;render();$('runtime-status').textContent='Electron '+runtime.version+' / '+runtime.arch+' 已独立登记。';message('运行时已登记，游戏设置仍需单独保存。');
+    state=next;render();$('runtime-status').textContent='Electron '+runtime.version+' / '+runtime.arch+' 已独立登记。';message('运行环境已登记，游戏设置仍需单独保存。');
   }catch(error){$('runtime-status').textContent=error.message;fail(error);}finally{registering=false;setBusy(busy);}
 };
 $('game-form').onsubmit=async event=>{
@@ -105,7 +105,7 @@ $('game-form').onsubmit=async event=>{
   catch(error){fail(error);}finally{saving=false;setBusy(busy);}
 };
 $('launch').onclick=async()=>{if(busy||!selected)return;setBusy(true);try{await window.launcher.launchGame(selected);}catch(error){setBusy(false);fail(error);}};
-window.launcher.onLaunchState(value=>{setBusy(['validating','starting','running'].includes(value.phase));if(current())$('game-status').textContent=busy?'游戏进程处理中':'游戏已停止';message(value.message||({validating:'正在检查游戏与运行时…',starting:'正在启动…',exited:'游戏已退出。'}[value.phase]||value.phase),value.phase==='failed');});
+window.launcher.onLaunchState(value=>{setBusy(['validating','starting','running'].includes(value.phase));if(current())$('game-status').textContent=busy?'游戏进程处理中':'游戏已停止';message(value.message||({validating:'正在检查游戏与运行环境…',starting:'正在启动…',exited:'游戏已退出。'}[value.phase]||value.phase),value.phase==='failed');});
 document.addEventListener('keydown',event=>{
   const panel=!$('runtime-panel').hidden?$('runtime-panel'):!$('settings-panel').hidden?$('settings-panel'):null;if(!panel)return;
   if(event.key==='Escape'){event.preventDefault();if(panel===$('runtime-panel'))closeRuntime();else closeSettings();}
