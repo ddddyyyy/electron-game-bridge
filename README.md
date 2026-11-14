@@ -1,8 +1,20 @@
-# Generic Electron Launcher
+# Electron Game Bridge
 
-一个本地 Electron 游戏启动器，使用 JavaScript/CommonJS、HTML/CSS 和原生 DOM。
-默认打开空游戏库；仓库不包含游戏、存档、预设安装目录或 Electron 二进制。
-目前支持 macOS，保留与 Electron 内置 Node 12 的共享代码兼容性，不要求迁移构建系统。
+在 macOS 上运行仅提供 Windows EXE 发行包的 Electron 游戏。
+
+项目面向游戏没有提供 macOS 版本、但 Windows 发行目录中保留了 Electron 应用资源的场景。
+启动器识别游戏所需的 Electron 版本，匹配用户提供的 macOS 运行时，加载游戏资源及其原始 JavaScript 主入口。
+EXE 用于提供版本和架构证据，实际游戏进程由 macOS Electron 运行。
+
+支持本地多游戏管理、独立启动配置和运行数据隔离。默认打开空游戏库；仓库不包含游戏、存档、预设安装目录或 Electron 二进制。
+使用 JavaScript/CommonJS、HTML/CSS 和原生 DOM，共享代码兼容 Node 12；无需新增构建系统。
+
+## 适用范围
+
+- 优先支持完整 Windows 发行目录中包含 `resources/app.asar` 的 Electron 游戏。添加游戏时选择整个安装目录，并保留随附 EXE 和其他资源。
+- 如果只有单个 EXE，且没有当前启动器能够读取的应用资源，本项目不会自动提取该 EXE 中的游戏。
+- 游戏原始主入口、preload 和初始化流程必须能在相应 macOS Electron 中工作。依赖 Windows 专属组件或不兼容原生模块的游戏可能无法运行。
+- 不修改、重打包游戏，不自动下载运行时，也不承诺 Windows 存档能够跨平台直接续用。
 
 ## 启动
 
