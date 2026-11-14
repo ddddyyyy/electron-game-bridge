@@ -40,7 +40,7 @@
 
 存放在 .launcher/games/<game-id>/save-backups/<backup-id>/manifest.json，备份文件为同目录中的 files/<原文件名>；目录 0700、文件 0600。ID、相对文件名全部由后端限制，不从配置拼接任意路径。
 
-清单 version、backupId、gameId、createdAt、profileId、projectId、sourceLocation、sourceDirectoryIdentity、files[]；每项 name/size/sha256/mtime；purpose 区分 policy-change 与 pre-clear，pre-clear 另关联清档 operationId 和受影响键集合。清单状态为 complete，且所有文件存在、校验一致才可引用。临时目录以独立随机名称创建，不完整目录永远不计成功。
+清单 version、backupId、gameId、createdAt、profileId、projectId、sourceLocation、sourceDirectoryIdentity、files[]；每项 name/size/sha256/mtime；purpose 区分 policy-change 与 pre-clear，pre-clear 另关联清档 operationId；受影响键集合记在对应 pendingClear，备份仍保存所选目录完整集合。清单状态为 complete，且所有文件存在、校验一致才可引用。临时目录以独立随机名称创建，不完整目录永远不计成功。
 
 事务：
 
@@ -62,7 +62,7 @@
 
 ## 5. LaunchSaveContext（一次启动的私有描述）
 
-只在策略启用时创建；含 gameId、profile/evidence、选定目录与键集合、备份引用、实际运行环境身份、一次性 nonce。置于该游戏 .launcher 私有目录，0600 独占写入；不复用旧描述，不接受用户参数覆盖；仅清理本次创建的临时文件。
+只在策略启用时创建；含 gameId、profile/evidence、选定目录与键集合、备份引用和一次性 nonce；实际运行环境身份仍由既有 runtime.json 绑定及启动探针核对，不在描述中重复。置于该游戏 .launcher 私有目录，0600 独占写入；不复用旧描述，不接受用户参数覆盖；仅清理本次创建的临时文件。
 
 子进程通过固定 main-hook 读取描述。使用 child_process 的额外单向 stdio 管道（fd 3）发送有界 JSON 行状态，stdout/stderr 继续写现有日志；不会从日志文本解析授权状态。未启用游戏保留原有 stdio 和 argv。
 

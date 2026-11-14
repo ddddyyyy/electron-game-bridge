@@ -25,6 +25,8 @@
 
 后端顺序：单操作锁 → 停止/配置冲突检查 → 原有运行环境探测与数据绑定校验 → 重新扫描与归属检查 → 完成备份 → 再核对 → 原子保存配置。锁在任意异步等待期间持续生效；失去 UI 焦点不等于取消已开始的提交。
 
+管理窗口另接收固定 launcher:save-progress 事件，载荷为 {gameId,phase}，phase 仅为 checking / backing-up / saving；只报告实际进入的阶段，不发送存档内容。preload 暴露 onSaveProgress，界面只在本次保存进行时消费，完成/失败后忽略迟到事件。
+
 响应沿用现有快照和 savedGameId。只有备份与配置均成功后关闭编辑面板；失败保留当前输入。备份成功但配置失败的副本保留并显示可恢复提示，不宣称启用成功。
 
 ### readLibrary / launchGame / restoreConfig

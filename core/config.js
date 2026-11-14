@@ -15,6 +15,14 @@ function inside(parent, child) {
   return !rel || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
 }
 function sha(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
+function savePolicyErrors(policy) {
+  if(policy==null)return null;
+  const keys=['version','profileId','projectId','evidenceHash','location','directoryIdentity','backupId','otherSnapshot','hadSaves'];
+  if(!object(policy)||Object.keys(policy).some(k=>!keys.includes(k))||policy.version!==1||!id(policy.profileId)||typeof policy.projectId!=='string'||!/^[A-Za-z0-9_-]{1,120}$/.test(policy.projectId)||!/^[a-f0-9]{64}$/.test(policy.evidenceHash)||!['install','resources'].includes(policy.location)||!id(policy.backupId)||typeof policy.hadSaves!=='boolean'||!object(policy.otherSnapshot))return '存档兼容策略无效';
+  const directory=policy.directoryIdentity;
+  if(!object(directory)||Object.keys(directory).some(k=>!['realPath','dev','ino'].includes(k))||typeof directory.realPath!=='string'||!path.isAbsolute(directory.realPath)||!/^\d+$/.test(directory.dev)||!/^\d+$/.test(directory.ino))return '存档目录身份无效';
+  return null;
+}
 function runtimeErrors(r) {
   const e = {};
   if (!object(r)) return { runtime: '运行环境记录必须为对象' };
@@ -50,18 +58,22 @@ function validateGame(g, lib, metadata) {
   if (g.window != null) {
     if (!adapter || !adapter.window || !object(g.window) || Object.keys(g.window).some(k => !['width', 'height', 'title'].includes(k)) || !Number.isInteger(g.window.width) || g.window.width < 320 || g.window.width > 7680 || !Number.isInteger(g.window.height) || g.window.height < 240 || g.window.height > 4320 || typeof g.window.title !== 'string' || g.window.title.length > 120) e.window = '此适配的窗口设置无效或不受支持';
   }
-  const keys = ['id', 'name', 'iconPath', 'installPath', 'adapterId', 'runtimeId', 'entry', 'workingDirectory', 'args', 'window', 'capabilities'];
+  if(g.savePolicy!=null) {
+    const error=savePolicyErrors(g.savePolicy);
+    if(lib.schemaVersion!==2||error)e.savePolicy=error||'存档策略需要新版配置';
+  }
+  const keys = ['id', 'name', 'iconPath', 'installPath', 'adapterId', 'runtimeId', 'entry', 'workingDirectory', 'args', 'window', 'capabilities','savePolicy'];
   if (Object.keys(g).some(k => !keys.includes(k))) e.game = '包含未知游戏字段';
   return e;
 }
 function decode(bytes) {
   let value;
   try { value = JSON.parse(bytes.toString()); } catch (_) { throw failure('CONFIG_INVALID', '配置无法解析，请恢复备份'); }
-  if (!object(value) || value.schemaVersion !== 1) throw failure('CONFIG_VERSION_UNSUPPORTED', '配置版本不受支持，原文件保持不变');
+  if (!object(value) || ![1,2].includes(value.schemaVersion)) throw failure('CONFIG_VERSION_UNSUPPORTED', '配置版本不受支持，原文件保持不变');
   if (!Number.isSafeInteger(value.revision) || value.revision < 0 || !Array.isArray(value.games) || !Array.isArray(value.runtimes) || Object.keys(value).some(k => !['schemaVersion', 'revision', 'games', 'runtimes'].includes(k))) throw failure('CONFIG_INVALID', '配置顶层结构无效');
   return value;
 }
-module.exports = { failure, canonical, inside, sha, runtimeErrors, validateGame, decode, object, id };
+module.exports = { failure, canonical, inside, sha, runtimeErrors, validateGame, decode, object, id, savePolicyErrors };
 function createStore(directory, defaults, metadata, io) {
   io = io || fs;
   const file = path.join(directory, 'library.json');
@@ -120,6 +132,12 @@ function createStore(directory, defaults, metadata, io) {
     const next = JSON.stringify(library, null, 2) + '\n';
     if (Buffer.byteLength(next) > 2 * 1024 * 1024) throw failure('CONFIG_INVALID', '配置超过 2 MiB 上限');
     try {
+      if(state.library.schemaVersion===1&&library.schemaVersion===2) {
+        const original=file+'.v1-original';
+        if(!io.existsSync(original)) {
+          atomic(original,previous||JSON.stringify(state.library,null,2)+'\n');
+        } else if(decode(io.readFileSync(original)).schemaVersion!==1)throw Error('升级前原件不是 v1 配置');
+      }
       atomic(file + '.bak', previous || JSON.stringify(state.library, null, 2) + '\n');
       atomic(file, next);
     } catch (error) { throw failure('CONFIG_WRITE_FAILED', '保存失败，原配置/备份保留：' + error.message); }
@@ -130,9 +148,11 @@ function createStore(directory, defaults, metadata, io) {
     const library = JSON.parse(JSON.stringify(state.library));
     const game = JSON.parse(JSON.stringify(request.game));
     if (!object(game)) throw failure('GAME_INVALID', '缺少游戏记录');
+    if(Object.prototype.hasOwnProperty.call(game,'savePolicy'))library.schemaVersion=2;
     if (!game.id) game.id = 'game-' + crypto.randomBytes(8).toString('hex');
     const index = library.games.findIndex(g => object(g) && g.id === game.id);
     if (index >= 0 && library.games.filter(g => object(g) && g.id === game.id).length !== 1) throw failure('DUPLICATE_GAME', '身份重复，请恢复配置');
+    if(index>=0&&!Object.prototype.hasOwnProperty.call(game,'savePolicy')&&library.games[index].savePolicy)game.savePolicy=library.games[index].savePolicy;
     const fields = validateGame(game, library, metadata);
     if (Object.keys(fields).length) throw failure('GAME_INVALID', '请修正游戏配置', fields);
     if (index >= 0) {

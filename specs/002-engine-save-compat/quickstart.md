@@ -1,6 +1,6 @@
 # Quickstart & Validation: 引擎存档路径兼容
 
-本文件描述实施后的操作和验证步骤。当前只完成规划，新增测试文件、开关和保护逻辑尚未实现，以下预期结果不能视作已通过。
+本文件描述已实现功能的操作与隔离验证步骤；实际执行结果与限制见 [validation.md](validation.md)，不能将步骤本身当作通过证据。
 
 ## 1. 准备
 
@@ -25,9 +25,9 @@ git diff --check
 node scripts/audit-publication.js
 ```
 
-测试根只包含测试创建的数据；不要指向玩家安装目录。图形入口沿用当前隔离检查，由后续任务扩展覆盖本 Feature，不编造 npm test/lint 命令。
+测试根只包含测试创建的数据；不要指向玩家安装目录。图形入口沿用当前隔离检查，已扩展覆盖本 Feature，不编造 npm test/lint 命令。
 
-实施后新增的纯逻辑入口（当前尚不存在）：
+存档纯逻辑入口：
 
 ```sh
 node tests/save-policy.test.js
@@ -43,6 +43,16 @@ ELECTRON_RUN_AS_NODE=1 "$LAUNCHER_ELECTRON" tests/save-policy.test.js
 5. 原游戏的刷新/重载每次都在首次访问前重新建立保护，使用当前页面代次 ready；旧页面消息不能放行新页面，进程保持互斥。已失败进程的 poisoned 不能靠刷新解除。
 6. 原清档确认取消或操作前备份失败时零删除/重置；成功后刷新及重启可保存新进度；清档中断保留完整操作前副本及未完成记录。
 7. 首次适配握手超时、子进程异常、fd 3 继承失败、跨块 JSON 行、就绪前 EOF、EPIPE 和握手伪造消息，均不得标记适配成功；终止完成前保持启动互斥。
+
+单独运行适配门槛：
+
+```sh
+node tests/save-hook-smoke.js "$LAUNCHER_ELECTRON"
+node tests/save-hook-smoke.js "$LAUNCHER_ELECTRON" --engine-layout
+node tests/save-hook-smoke.js "$LAUNCHER_ELECTRON" --legacy-layout
+```
+
+直接图形启动若受 macOS 崩溃恢复弹窗干扰，可仅在 `--library-smoke-test` 命令末尾追加 `-ApplePersistenceIgnoreState YES`；测试驱动也只为测试子进程追加这对参数，不改全局偏好。失败门槛必须以退出码 1 结束，信号崩溃不算通过。
 
 分别在两种 Electron 执行，不通过的组合明确不支持，不能靠修改游戏权限、平台值或引擎包绕过门槛。
 
@@ -63,7 +73,7 @@ ELECTRON_RUN_AS_NODE=1 "$LAUNCHER_ELECTRON" tests/save-policy.test.js
 
 所有断言使用合成进度和隔离目录；不得用测试清理函数删除玩家数据。
 
-## 5. 两个真实样本验收（实施后）
+## 5. 两个真实样本验收
 
 在授权范围内各复制完整发行目录和所需存档到独立临时位置，确保原件不被应用访问；运行环境匹配其实际版本，不为满足双版本测试强行切换真实游戏版本。
 
@@ -71,7 +81,7 @@ ELECTRON_RUN_AS_NODE=1 "$LAUNCHER_ELECTRON" tests/save-policy.test.js
 
 公开记录仅含样本 A/B、运行环境版本、profile、步骤结果和限制，不含游戏包、真实存档内容、个人路径、截图或账户信息。真实样本未执行则标记未验证，不能用合成测试替代 SC-001。
 
-## 6. 玩家使用流程（实施后）
+## 6. 玩家使用流程
 
 游戏停止 → 打开游戏设置 → 检查“存档兼容”的引擎支持状态 → 启用 → 查看两个位置的文件名和修改时间 → 明确选择 → 保存并等待备份与配置成功 → 在详情核对存档位置 → 启动。
 

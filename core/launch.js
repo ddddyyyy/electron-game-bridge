@@ -2,6 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { failure, inside, canonical } = require('./config');
 function parseArgs(args) {
+  args=args.slice();
+  if(args.includes('--library-smoke-test')) {
+    const preference=args.indexOf('-ApplePersistenceIgnoreState');
+    if(preference>=0&&args[preference+1]==='YES')args.splice(preference,2);
+  }
   const result={library:true,librarySmoke:false};
   const seen=new Set();
   args.forEach(arg=>{
@@ -26,7 +31,7 @@ function testRoot(root, target, protectedPaths) {
 module.exports = { parseArgs, testRoot };
 function cleanEnv(source) {
   const env = Object.assign({}, source);
-  ['ELECTRON_RUN_AS_NODE','NODE_OPTIONS','NODE_PATH','ELECTRON_FORCE_IS_PACKAGED'].forEach(k => delete env[k]);
+  ['ELECTRON_RUN_AS_NODE','NODE_OPTIONS','NODE_PATH','ELECTRON_FORCE_IS_PACKAGED','LAUNCHER_SAVE_CONTEXT'].forEach(k => delete env[k]);
   return env;
 }
 function removeTree(p) {
@@ -67,16 +72,31 @@ class Runner extends require('events') {
   async start(game,runtime,context) {
     if (this.busy) throw failure('ALREADY_RUNNING','已有游戏启动中或运行中');
     this.busy=true; this.state(game,'validating');
+    let contextFile;
     try {
       const { validateGame } = require('./config');
       const adapters = require('../adapters');
-      const fields=validateGame(game,{games:[game],runtimes:[runtime]},adapters.metadata);
+      const library=context.library||{schemaVersion:game.savePolicy?2:1,games:[game],runtimes:[runtime]};
+      const fields=validateGame(game,library,adapters.metadata);
       if(Object.keys(fields).length) throw failure('GAME_INVALID','游戏配置无效',fields);
       const actual=await this.probe(runtime.executablePath);
       if(['version','arch','platform','fingerprint'].some(k=>actual[k]!==runtime[k])) throw failure('RUNTIME_MISMATCH','运行环境文件/版本已变化，请登记新记录');
       const resolved=resolveRuntime(game,{runtimes:[runtime]});
       checkDataRuntime(game,actual,context);
       const descriptor=adapters.describe(game,runtime,context);
+      let nonce;
+      if(game.savePolicy) {
+        const policies=require('./save-policy').create(context,{inspect:adapters.inspectSaveProfile,validate:adapters.validateSaveBytes});
+        const verified=policies.validate(game,library);
+        nonce=require('crypto').randomBytes(16).toString('hex');
+        contextFile=path.join(context.dataRoot,'games',game.id,'launch-'+nonce+'.json');
+        fs.mkdirSync(path.dirname(contextFile),{recursive:true,mode:0o700});
+        const ownedGame={id:game.id,installPath:game.installPath,entry:game.entry,adapterId:game.adapterId,savePolicy:game.savePolicy};
+        const ownership={games:library.games.map(g=>({id:g&&g.id,savePolicy:g&&g.savePolicy?{directoryIdentity:g.savePolicy.directoryIdentity}:null}))};
+        const value={version:1,gameId:game.id,nonce,profile:verified.profile,selectedDirectory:game.savePolicy.directoryIdentity.realPath,game:ownedGame,library:ownership,context:{dataRoot:context.dataRoot}};
+        const fd=fs.openSync(contextFile,'wx',0o600);
+        try{fs.writeFileSync(fd,JSON.stringify(value));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+      }
       if(!fs.existsSync(descriptor.entry)) throw failure('ENTRY_UNAVAILABLE','游戏入口不存在：'+descriptor.entry);
       fs.accessSync(descriptor.cwd,fs.constants.R_OK);
       fs.mkdirSync(descriptor.userData,{recursive:true});
@@ -94,16 +114,59 @@ class Runner extends require('events') {
       fs.writeSync(log,JSON.stringify({gameId:game.id,runtimeId:runtime.id,version:actual.version,arch:actual.arch,phase:'starting',time:new Date().toISOString()})+'\n');
       this.state(game,'starting');
       let child;
-      try { child=this.spawn(descriptor.executablePath,descriptor.argv,{cwd:descriptor.cwd,env:cleanEnv(descriptor.env||process.env),shell:false,stdio:['ignore',log,log]}); }
+      const env=cleanEnv(descriptor.env||process.env);if(contextFile)env.LAUNCHER_SAVE_CONTEXT=contextFile;
+      try { child=this.spawn(descriptor.executablePath,descriptor.argv,{cwd:descriptor.cwd,env,shell:false,stdio:contextFile?['ignore',log,log,'pipe']:['ignore',log,log]}); }
       finally { fs.closeSync(log); }
       this.child=child;
-      let finished=false;
-      const done=(phase,details)=>{if(finished)return;finished=true;this.busy=false;this.child=null;this.state(game,phase,details);};
-      child.once('error',e=>done('failed',{code:'LAUNCH_FAILED',message:e.message}));
-      child.once('close',(code,signal)=>done(code===0?'exited':'failed',{code:code===0?'GAME_EXITED':'LAUNCH_FAILED',exitCode:code,signal,message:code===0?'游戏已退出':'游戏退出，代码 '+code+'；请查看 '+logPath}));
-      if(child.pid) this.state(game,'running',{pid:child.pid,message:'进程已启动（不代表完整游戏已验证）',version:actual.version,arch:actual.arch});
+      let finished=false,timer,failureDetails,ready=false,generation=0,pageBytes=0;
+      const cleanup=()=>{clearTimeout(timer);if(contextFile&&fs.existsSync(contextFile))fs.unlinkSync(contextFile);};
+      const done=(phase,details)=>{if(finished)return;finished=true;cleanup();this.busy=false;this.child=null;this.state(game,phase,details);};
+      const stop=(code,message)=>{
+        if(failureDetails||finished)return;failureDetails={code,message};clearTimeout(timer);
+        child.kill('SIGTERM');timer=setTimeout(()=>{if(!finished)child.kill('SIGKILL');},1000);
+      };
+      const deadline=()=>{clearTimeout(timer);timer=setTimeout(()=>stop('SAVE_HOOK_TIMEOUT','存档适配未就绪，已停止游戏'),10000);};
+      child.once('error',e=>{if(contextFile&&child.pid)stop('SAVE_HOOK_FAILED',e.message);else done('failed',{code:'LAUNCH_FAILED',message:e.message});});
+      child.once('close',(code,signal)=>{
+        if(contextFile&&!ready&&!failureDetails)failureDetails={code:'SAVE_HOOK_FAILED',message:'游戏退出前存档适配未完成'};
+        done(failureDetails?'failed':code===0?'exited':'failed',failureDetails||{code:code===0?'GAME_EXITED':'LAUNCH_FAILED',exitCode:code,signal,message:code===0?'游戏已退出':'游戏退出，代码 '+code+'；请查看 '+logPath});
+      });
+      if(contextFile) {
+        this.state(game,'adapting',{pid:child.pid,message:'正在建立存档保护…'});deadline();
+        const pipe=child.stdio&&child.stdio[3];let buffer='';const decoder=new (require('string_decoder').StringDecoder)('utf8');
+        if(!pipe)stop('SAVE_HOOK_FAILED','存档状态管道不可用');
+        else {
+          pipe.on('data',bytes=>{
+            if(failureDetails||finished)return;
+            buffer+=decoder.write(bytes);
+            try {
+              let newline;
+              while((newline=buffer.indexOf('\n'))!==-1) {
+                const line=buffer.slice(0,newline);buffer=buffer.slice(newline+1);
+                if(Buffer.byteLength(line)>8192)throw Error('存档状态消息超限');
+                const value=JSON.parse(line);
+                if(value.type!=='save-adapter'||value.gameId!==game.id||value.nonce!==nonce||!Number.isSafeInteger(value.documentGeneration)||value.documentGeneration<0)throw Error('存档状态来源无效');
+                if(value.documentGeneration<generation)continue;
+                if(value.phase==='adapting') {
+                  if(value.documentGeneration<=generation)throw Error('页面接入顺序无效');
+                  generation=value.documentGeneration;pageBytes=0;ready=false;deadline();this.state(game,'adapting',{message:'正在重新建立存档保护…'});
+                }
+                pageBytes+=Buffer.byteLength(line)+1;if(pageBytes>65536)throw Error('页面存档状态消息总量超限');
+                if(value.phase==='adapter-ready') {
+                  if(generation===0||value.documentGeneration!==generation||ready)throw Error('存档就绪状态顺序无效');
+                  ready=true;clearTimeout(timer);this.state(game,'running',{pid:child.pid,message:'存档适配已就绪（不代表完整游戏已验证）',version:actual.version,arch:actual.arch});
+                }else if(value.phase==='failed')stop(value.code||'SAVE_HOOK_FAILED',value.message||'存档适配失败');
+                else if(value.phase!=='adapting')throw Error('未知存档状态');
+              }
+              if(Buffer.byteLength(buffer)>8192)throw Error('存档状态消息超限');
+            }catch(error){stop('SAVE_HOOK_FAILED',error.message);}
+          });
+          pipe.once('end',()=>{if(!ready)stop('SAVE_HOOK_FAILED','存档状态通道提前关闭');});
+          pipe.once('error',error=>stop('SAVE_HOOK_FAILED',error.message));
+        }
+      }else if(child.pid)this.state(game,'running',{pid:child.pid,message:'进程已启动（不代表完整游戏已验证）',version:actual.version,arch:actual.arch});
       return {gameId:game.id,phase:'starting',pid:child.pid,logPath};
-    } catch(error) { this.busy=false;this.state(game,'failed',{code:error.code||'LAUNCH_FAILED',message:error.message});throw error; }
+    } catch(error) { if(contextFile&&fs.existsSync(contextFile))fs.unlinkSync(contextFile);this.busy=false;this.state(game,'failed',{code:error.code||'LAUNCH_FAILED',message:error.message});throw error; }
   }
 }
 Object.assign(module.exports,{ cleanEnv, inspectRuntime, Runner, removeTree });

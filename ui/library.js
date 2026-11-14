@@ -1,5 +1,6 @@
 const $=id=>document.getElementById(id);
 let state,selected=null,editingId=null,busy=false,saving=false,registering=false,returnFocus=null,runtimeFocus=null,resolutionSequence=0;
+let savePreview=null,saveDirty=false,saveBase=null,saveSequence=0;
 function message(text,error){$('message').textContent=text||'';$('message').classList.toggle('error',!!error);}
 function fail(error){message(error.message,true);$('fields-error').textContent=error.fieldErrors?Object.keys(error.fieldErrors).map(k=>k+'：'+error.fieldErrors[k]).join('\n'):error.message;}
 function current(){return state&&state.library&&state.library.games.find(g=>g&&g.id===selected);}
@@ -28,6 +29,7 @@ function render(){
     art($('detail-art'),game,state.library.games.indexOf(game));$('detail-title').textContent=game.name||'名称待修复';$('detail-path').textContent=game.installPath||'安装位置待修复';
     const runtime=state.library.runtimes.find(r=>r&&r.id===game.runtimeId);
     $('detail-runtime').textContent=runtime?'Electron '+runtime.version+' · '+runtime.arch:'运行环境需修复';
+    const storedSave=state.saveStatus&&state.saveStatus.find(s=>s.gameId===game.id);$('detail-save').textContent=storedSave&&storedSave.enabled?'存档位置：'+storedSave.directory:'存档兼容：未启用';
     $('game-status').textContent=busy?'游戏进程处理中':state.errors.some(e=>e.gameId===game.id)?'配置待修复':'本地配置已登记';
   }
   renderRuntimes();setBusy(busy);
@@ -47,7 +49,7 @@ function setBusy(value){
   ['add','settings','nav-runtime'].forEach(id=>$(id).disabled=locked||bad||(id==='settings'&&!current()));
   $('launch').disabled=locked||bad||!selected;
   $('game-fields').disabled=locked;$('runtime-fields').disabled=locked;
-  ['save','inspect','open-runtime'].forEach(id=>$(id).disabled=locked||bad);
+  ['save','inspect','open-runtime','inspect-saves'].forEach(id=>$(id).disabled=locked||bad);
   $('restore').disabled=locked;$('close-settings').disabled=saving||registering;$('cancel').disabled=saving||registering;$('close-runtime').disabled=registering;
 }
 function formGame(){
@@ -65,9 +67,9 @@ function openSettings(game,trigger){
   returnFocus=trigger||document.activeElement;editingId=game?game.id:null;
   $('settings-title').textContent=game?'游戏设置':'添加游戏';$('name').value=game?game.name:'';
   $('install').value=game?game.installPath:'';$('icon').value=game?game.iconPath||'':'';$('entry').value=game?game.entry:'.';$('cwd').value=game?game.workingDirectory:'.';$('args').value=game&&Array.isArray(game.args)?game.args.join('\n'):'';
-  $('fields-error').textContent='';$('settings-panel').hidden=false;setBusy(busy);$('name').focus();resolve();
+  resetSaveForm(game);$('fields-error').textContent='';$('settings-panel').hidden=false;setBusy(busy);$('name').focus();resolve();
 }
-function closeSettings(){if(saving||registering)return;resolutionSequence++;$('settings-panel').hidden=true;editingId=null;if(returnFocus&&document.contains(returnFocus))returnFocus.focus();}
+function closeSettings(){if(saving||registering)return;resolutionSequence++;saveSequence++;$('settings-panel').hidden=true;editingId=null;if(returnFocus&&document.contains(returnFocus))returnFocus.focus();}
 function openRuntime(){if(busy||saving)return;runtimeFocus=document.activeElement;$('runtime-panel').hidden=false;renderRuntimes();$('runtime-path').focus();}
 function closeRuntime(){if(registering)return;$('runtime-panel').hidden=true;if(runtimeFocus)runtimeFocus.focus();if(!$('settings-panel').hidden)resolve();}
 async function reload(){try{accept(await window.launcher.readLibrary());}catch(error){fail(error);}}
@@ -87,7 +89,7 @@ document.querySelectorAll('[data-pick]').forEach(button=>button.onclick=async()=
       if(chosen!==base&&!chosen.startsWith(base+'/')){message('入口和工作目录必须位于安装目录内。',true);return;}
       $(target).value=chosen===base?'.':chosen.slice(base.length+1);
     }else $(target).value=chosen;
-    resolve();
+    invalidateSavePreview();resolve();
   }catch(error){fail(error);}
 });
 $('choose-runtime').onclick=async()=>{try{const p=await window.launcher.choosePath('runtime');if(p)$('runtime-path').value=p;}catch(error){fail(error);}};
@@ -96,16 +98,54 @@ $('runtime-form').onsubmit=async event=>{
   try{const runtime=await window.launcher.inspectRuntime($('runtime-path').value.trim());runtime.source=$('runtime-source').value.trim()||runtime.source;
     const next=await window.launcher.saveRuntime({revision:state.library.revision,token:state.token,runtime});
     // Refresh our own revision without replacing any unsaved game inputs.
-    state=next;render();$('runtime-status').textContent='Electron '+runtime.version+' / '+runtime.arch+' 已独立登记。';message('运行环境已登记，游戏设置仍需单独保存。');
+    invalidateSavePreview();state=next;render();$('runtime-status').textContent='Electron '+runtime.version+' / '+runtime.arch+' 已独立登记。';message('运行环境已登记，游戏设置仍需单独保存。');
   }catch(error){$('runtime-status').textContent=error.message;fail(error);}finally{registering=false;setBusy(busy);}
 };
 $('game-form').onsubmit=async event=>{
   event.preventDefault();if(busy||saving||registering)return;saving=true;setBusy(busy);
-  try{const next=await window.launcher.saveGame({revision:state.library.revision,token:state.token,game:formGame()});saving=false;closeSettings();accept(next,next.savedGameId);message('设置已保存。');}
+  try{const next=await window.launcher.saveGame({revision:state.library.revision,token:state.token,game:formGame(),saveChoice:saveChoice()});saving=false;closeSettings();accept(next,next.savedGameId);message('设置已保存。');}
   catch(error){fail(error);}finally{saving=false;setBusy(busy);}
 };
 $('launch').onclick=async()=>{if(busy||!selected)return;setBusy(true);try{await window.launcher.launchGame(selected);}catch(error){setBusy(false);fail(error);}};
-window.launcher.onLaunchState(value=>{setBusy(['validating','starting','running'].includes(value.phase));if(current())$('game-status').textContent=busy?'游戏进程处理中':'游戏已停止';message(value.message||({validating:'正在检查游戏与运行环境…',starting:'正在启动…',exited:'游戏已退出。'}[value.phase]||value.phase),value.phase==='failed');});
+window.launcher.onLaunchState(value=>{setBusy(['validating','starting','adapting','running'].includes(value.phase));if(current())$('game-status').textContent=busy?'游戏进程处理中':'游戏已停止';message(value.message||({validating:'正在检查游戏与运行环境…',starting:'正在启动…',exited:'游戏已退出。'}[value.phase]||value.phase),value.phase==='failed');});
+function resetSaveForm(game){
+  saveSequence++;savePreview=null;saveDirty=false;saveBase=game&&game.savePolicy;
+  $('save-enabled').checked=!!saveBase;$('save-enabled').disabled=!saveBase;$('save-candidates').textContent='';$('save-status').textContent='';
+  $('save-inspection').textContent=saveBase?'已启用，当前存档位置：'+saveBase.directoryIdentity.realPath:'先检查游戏是否支持文件存档兼容。';
+}
+function invalidateSavePreview(){
+  if(!savePreview)return;savePreview=null;saveSequence++;
+  if($('save-enabled').checked)saveDirty=true;
+  $('save-candidates').textContent='';$('save-inspection').textContent='设置已变化，请重新检查存档位置。';
+}
+['name','install','icon','entry','cwd','args'].forEach(id=>$(id).addEventListener('input',invalidateSavePreview));
+$('save-enabled').onchange=()=>{saveDirty=true;};
+$('inspect-saves').onclick=async()=>{
+  if(busy||saving||registering)return;const sequence=++saveSequence;
+  $('save-inspection').textContent='正在检查存档位置…';$('inspect-saves').disabled=true;
+  try {
+    const preview=await window.launcher.inspectSavePolicy({revision:state.library.revision,token:state.token,game:formGame()});
+    if(sequence!==saveSequence||$('settings-panel').hidden)return;
+    savePreview=preview;editingId=preview.gameId;$('save-enabled').disabled=false;
+    $('save-inspection').textContent='支持文件存档兼容，请确认要使用的位置。';$('save-candidates').textContent='';
+    const empty=preview.candidates.every(c=>!c.files.length);
+    preview.candidates.forEach(candidate=>{
+      const label=document.createElement('label');label.className='save-choice';
+      const radio=document.createElement('input');radio.type='radio';radio.name='save-location';radio.value=candidate.location;radio.disabled=!candidate.exists;radio.checked=empty&&candidate.location==='install';radio.onchange=()=>{saveDirty=true;};
+      const text=document.createElement('span');text.textContent=(candidate.location==='install'?'游戏目录':'资源目录')+'：'+candidate.displayPath;
+      const files=document.createElement('small');files.textContent=candidate.files.length?candidate.files.map(f=>f.name+' · '+new Date(f.mtime).toLocaleString()).join('\n'):'没有旧存档'+(candidate.exists?'':'（目录不存在）');text.append(files);label.append(radio,text);$('save-candidates').append(label);
+    });
+  }catch(error){if(sequence===saveSequence){savePreview=null;$('save-enabled').disabled=!saveBase;$('save-inspection').textContent=error.message;}}
+  finally{if(sequence===saveSequence)setBusy(busy);}
+};
+function saveChoice(){
+  if(!saveDirty)return undefined;
+  if(!$('save-enabled').checked)return {enabled:false};
+  const chosen=document.querySelector('input[name="save-location"]:checked');
+  if(!savePreview||!chosen)throw {message:'请重新检查并明确选择存档位置。'};
+  return {enabled:true,location:chosen.value,scanToken:savePreview.scanToken};
+}
+window.launcher.onSaveProgress(value=>{if(saving)$('save-status').textContent=({checking:'正在检查游戏与存档…','backing-up':'正在备份存档…',saving:'正在保存设置…'})[value.phase]||'';});
 document.addEventListener('keydown',event=>{
   const panel=!$('runtime-panel').hidden?$('runtime-panel'):!$('settings-panel').hidden?$('settings-panel'):null;if(!panel)return;
   if(event.key==='Escape'){event.preventDefault();if(panel===$('runtime-panel'))closeRuntime();else closeSettings();}

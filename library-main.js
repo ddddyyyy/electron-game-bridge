@@ -25,11 +25,14 @@ function start(context,options) {
   if(!app.requestSingleInstanceLock()){console.error('ALREADY_RUNNING: 游戏库已打开');app.exit(2);return;}
   const seed=adapters.defaults;
   const store=config.createStore(context.dataRoot,seed,adapters.metadata);
+  const savePolicies=require('./core/save-policy').create(context,{inspect:adapters.inspectSaveProfile,validate:adapters.validateSaveBytes});
+  let operationBusy=false;
   const runner=new Runner(); let window;
   const expected=pathToFileURL(path.join(context.root,'ui/index.html')).href;
   function snapshot() {
     const state=store.read(true);
     if(state.library) state.previews=state.library.games.map(g=>config.object(g)?iconPreview(g.iconPath):null);
+    if(state.library)state.saveStatus=state.library.games.map(g=>({gameId:g&&g.id,enabled:!!(g&&g.savePolicy),directory:g&&g.savePolicy&&g.savePolicy.directoryIdentity?g.savePolicy.directoryIdentity.realPath:null}));
     state.metadata=adapters.metadata;state.configPath=store.file;
     return state;
   }
@@ -38,7 +41,7 @@ function start(context,options) {
     window=new BrowserWindow({width:1280,height:840,minWidth:660,minHeight:560,title:'游戏库',webPreferences:{nodeIntegration:false,contextIsolation:true,enableRemoteModule:false,preload:path.join(context.root,'library-preload.js')}});
     window.webContents.on('will-navigate',(event,url)=>{if(url!==expected)event.preventDefault();});
     window.webContents.on('new-window',e=>e.preventDefault());
-    window.on('close',event=>{if(runner.busy){event.preventDefault();dialog.showMessageBox(window,{type:'info',message:'请先退出正在运行的游戏，再关闭游戏库。',buttons:['返回游戏库']});}});
+    window.on('close',event=>{if(runner.busy||operationBusy){event.preventDefault();dialog.showMessageBox(window,{type:'info',message:operationBusy?'正在处理配置，请稍候。':'请先退出正在运行的游戏，再关闭游戏库。',buttons:['返回游戏库']});}});
     runner.on('state',value=>{if(!window.isDestroyed())window.webContents.send('launcher:state',value);});
     const actions={
       readLibrary:snapshot,
@@ -57,15 +60,29 @@ function start(context,options) {
           return {status:'matched',requiredVersion:resolved.requirement.version,arch:resolved.requirement.arch,evidence:resolved.requirement.evidence,matchedRuntimeId:resolved.runtime.id};
         }catch(error){return {status:({GAME_RUNTIME_UNKNOWN:'unknown',GAME_RUNTIME_CONFLICT:'conflict',RUNTIME_MISSING:'missing'})[error.code]||'incompatible',code:error.code,message:error.message};}
       },
+      inspectSavePolicy:input=>{
+        if(!config.object(input)||!config.object(input.game))throw config.failure('INPUT_INVALID','缺少游戏设置');
+        if(['runtimeId','savePolicy'].some(key=>Object.prototype.hasOwnProperty.call(input.game,key)))throw config.failure('INPUT_INVALID','请通过固定存档选择操作提交');
+        const state=store.read();if(state.error)throw config.failure(state.error.code,state.error.message);
+        if(input.token!==state.token||input.revision!==state.library.revision)throw config.failure('CONFIG_CONFLICT','配置已变化，请重新载入');
+        const game=Object.assign({},input.game);if(!game.id)game.id='game-'+require('crypto').randomBytes(8).toString('hex');
+        const existing=state.library.games.find(g=>g&&g.id===game.id);if(existing)game.runtimeId=existing.runtimeId;
+        game.runtimeId=resolveRuntime(game,state.library).runtime.id;
+        return Object.assign(savePolicies.inspect(game,state),{gameId:game.id});
+      },
       saveGame:async input=>{
         if(!config.object(input)||!config.object(input.game))throw config.failure('INPUT_INVALID','缺少游戏记录');
         if(Object.prototype.hasOwnProperty.call(input.game,'runtimeId'))throw config.failure('INPUT_INVALID','运行环境由程序自动匹配，不接受手选版本');
+        if(Object.prototype.hasOwnProperty.call(input.game,'savePolicy'))throw config.failure('INPUT_INVALID','存档策略由程序生成，请通过位置选择提交');
         const state=store.read();if(state.error)throw config.failure(state.error.code,state.error.message);
+        if(input.token!==state.token||input.revision!==state.library.revision)throw config.failure('CONFIG_CONFLICT','配置已变化，请重新载入后编辑');
+        if(input.saveChoice!==undefined&&(!config.object(input.saveChoice)||typeof input.saveChoice.enabled!=='boolean'||Object.keys(input.saveChoice).some(k=>!['enabled','location','scanToken'].includes(k))))throw config.failure('INPUT_INVALID','存档选择无效');
         const game=Object.assign({},input.game);
         if(!game.id)game.id='game-'+require('crypto').randomBytes(8).toString('hex');
         const existing=state.library.games.find(g=>g&&g.id===game.id);
-        if(existing)game.runtimeId=existing.runtimeId;
+        if(existing){game.runtimeId=existing.runtimeId;if(existing.savePolicy)game.savePolicy=existing.savePolicy;}
         const resolved=resolveRuntime(game,state.library);
+        window.webContents.send('launcher:save-progress',{gameId:game.id,phase:'checking'});
         const actual=await inspectRuntime(resolved.runtime.executablePath);
         if(['version','arch','platform','fingerprint'].some(k=>actual[k]!==resolved.runtime[k]))throw config.failure('RUNTIME_MISMATCH','运行环境文件已改变，请独立登记新记录');
         game.runtimeId=resolved.runtime.id;
@@ -75,6 +92,11 @@ function start(context,options) {
         const descriptor=adapters.describe(game,actual,context);
         if(!fs.existsSync(descriptor.entry))throw config.failure('ENTRY_UNAVAILABLE','游戏入口不存在：'+descriptor.entry);
         if(runner.busy)throw config.failure('ALREADY_RUNNING','请先停止游戏，不能保存配置');
+        if(input.saveChoice!==undefined){
+          window.webContents.send('launcher:save-progress',{gameId:game.id,phase:'backing-up'});
+          game.savePolicy=savePolicies.apply(game,input.saveChoice,state);
+        } else if(game.savePolicy)savePolicies.validate(game,state.library);
+        window.webContents.send('launcher:save-progress',{gameId:game.id,phase:'saving'});
         store.saveGame(Object.assign({},input,{game}));return Object.assign(snapshot(),{savedGameId:game.id});
       },
       saveRuntime:async input=>{
@@ -90,16 +112,20 @@ function start(context,options) {
         const game=state.library.games.find(g=>config.object(g)&&g.id===id);
         if(!game||state.errors.some(e=>e.gameId===id))throw config.failure('GAME_INVALID','游戏配置无效，请编辑修正');
         const resolved=resolveRuntime(game,state.library);
-        return runner.start(Object.assign({},game,{runtimeId:resolved.runtime.id}),resolved.runtime,context);
+        return runner.start(Object.assign({},game,{runtimeId:resolved.runtime.id}),resolved.runtime,Object.assign({},context,{library:state.library}));
       },
-      restoreConfig:input=>{if(!config.object(input))throw config.failure('INPUT_INVALID','缺少恢复请求');store.restore(input.token);return snapshot();}
+      restoreConfig:input=>{if(!config.object(input))throw config.failure('INPUT_INVALID','缺少恢复请求');store.restore(input.token);savePolicies.clearTokens();return snapshot();}
     };
     ipcMain.handle('launcher:request',async(event,request)=>{
       try {
         if(event.sender!==window.webContents || event.sender.getURL()!==expected) throw config.failure('FORBIDDEN','只允许游戏库页面调用');
         if(!config.object(request)||typeof request.action!=='string'||!Object.prototype.hasOwnProperty.call(actions,request.action))throw config.failure('INPUT_INVALID','不支持的操作');
-        if(runner.busy && ['saveGame','saveRuntime','restoreConfig'].includes(request.action))throw config.failure('ALREADY_RUNNING','游戏启动/运行中不能保存或恢复配置');
-        return {ok:true,value:await actions[request.action](request.payload)};
+        const locked=['saveGame','saveRuntime','restoreConfig','launchGame','inspectSavePolicy'].includes(request.action);
+        if(runner.busy && locked)throw config.failure('ALREADY_RUNNING','游戏启动/运行中不能保存、恢复或重新检查配置');
+        if(locked&&operationBusy)throw config.failure('OPERATION_BUSY','另一个配置或启动操作正在进行，请稍候');
+        if(locked)operationBusy=true;
+        try{return {ok:true,value:await actions[request.action](request.payload)};}
+        finally{if(locked)operationBusy=false;}
       }catch(error){console.error('[library]',error.code||'FAILED',error.message);return {ok:false,code:error.code||'FAILED',message:error.message,fieldErrors:error.fieldErrors};}
     });
     window.loadFile(path.join(context.root,'ui/index.html'));

@@ -7,12 +7,17 @@ function defaults() {
   return { schemaVersion: 1, revision: 0, runtimes: [], games: [] };
 }
 module.exports = { metadata, defaults };
+module.exports.inspectSaveProfile=game=>require('./tyrano-save/profile').inspect(game);
+module.exports.validateSaveBytes=(bytes,name)=>require('./tyrano-save/profile').validateSaveBytes(bytes,name);
+module.exports.encodeSave=(value,name)=>require('./tyrano-save/profile').encodeSave(value,name);
 function describe(game,runtime,context) {
   const entry = applicationEntry(game);
   const cwd = path.resolve(game.installPath,game.workingDirectory);
   const userData=path.join(context.dataRoot,'games',game.id,'userdata');
   if(game.adapterId!=='electron-app')throw new Error('不支持的启动方式');
   const argv=['--user-data-dir='+userData,entry].concat(game.args);
+  if(game.savePolicy)argv.splice(1,0,'--require',path.join(__dirname,'tyrano-save/main-hook.js'));
+  if(context.test&&process.platform==='darwin')argv.push('-ApplePersistenceIgnoreState','YES');
   return {executablePath:runtime.executablePath,argv,cwd,userData,entry,env:Object.assign({},process.env)};
 }
 module.exports.describe=describe;

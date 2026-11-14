@@ -24,8 +24,30 @@ function remove(p) {
     assert.deepStrictEqual(require('../adapters').defaults(),{schemaVersion:1,revision:0,games:[],runtimes:[]});
     const launch = require('../core/launch');
     const adapters = require('../adapters');
+    const profileRoot=path.join(tmp,'profile 日本語');
+    require('./save-hook-smoke').copy(path.join(__dirname,'fixtures/tyrano-save'),profileRoot);
+    const recognitionGame={installPath:profileRoot,entry:'.',adapterId:'electron-app'};
+    const inspectProfile=()=>adapters.inspectSaveProfile?adapters.inspectSaveProfile(recognitionGame):{status:'unsupported'};
+    assert.strictEqual(inspectProfile().status,'supported','Known file-storage fixture must be recognized');
+    assert.strictEqual(inspectProfile().profile.projectId,'fixture_save');
+    const configFile=path.join(profileRoot,'data/system/Config.tjs'),originalConfig=fs.readFileSync(configFile);
+    for(const invalid of [';projectID=../escape\n;configSave=file',';projectID=a\n;projectID=b\n;configSave=file',';projectID=fixture_save\n;configSave=webstorage',';projectID=getDynamic()\n;configSave=file']) {
+      fs.writeFileSync(configFile,invalid);assert.strictEqual(inspectProfile().status,'unsupported');
+    }
+    fs.writeFileSync(configFile,originalConfig);
+    const storageFile=path.join(profileRoot,'storage.js'),originalStorage=fs.readFileSync(storageFile);
+    fs.writeFileSync(storageFile,'// .sav only');assert.strictEqual(inspectProfile().status,'unsupported');
+    fs.writeFileSync(storageFile,Buffer.alloc(5*1024*1024+1));assert.strictEqual(inspectProfile().status,'unsupported');
+    fs.writeFileSync(storageFile,originalStorage);
+    assert.strictEqual(inspectProfile().status,'supported');
+    const secondRoot=path.join(tmp,'profile second');require('./save-hook-smoke').copy(path.join(__dirname,'fixtures/tyrano-save'),secondRoot);require('./save-hook-smoke').variant(secondRoot,'fixture_second');
+    const secondProfile=adapters.inspectSaveProfile?adapters.inspectSaveProfile(Object.assign({},recognitionGame,{installPath:secondRoot})):{status:'unsupported'};
+    assert.strictEqual(secondProfile.status,'supported');assert.strictEqual(secondProfile.profile.layout,'tyrano','Prototype-style clear boundary must be recognized');
+    console.log('PASS: bounded engine profile recognition, declarations and source evidence');
     assert.throws(() => launch.parseArgs(['--library-smoke-test']), /测试|test/i);
     assert.throws(() => launch.parseArgs(['--unknown']), /参数/);
+    assert(launch.parseArgs(['--library-smoke-test','--test-root=/tmp/synthetic','-ApplePersistenceIgnoreState','YES']).librarySmoke);
+    assert.throws(()=>launch.parseArgs(['--library','-ApplePersistenceIgnoreState','YES']),/参数/);
     assert.throws(() => launch.testRoot(path.resolve(__dirname, '..'), path.resolve(__dirname, '..', '.userdata')), /测试/);
     const root = path.join(tmp, 'game 中文'); fs.mkdirSync(root);
     const runtime = { id: 'runtime-a', executablePath: '/test/electron', version: '26.6.10', platform: 'darwin', arch: 'x64', fingerprint: 'a'.repeat(64), source: 'test' };
@@ -39,7 +61,29 @@ function remove(p) {
     assert(config.validateGame(Object.assign({}, game, { id: 'game-b', installPath: alias }), lib, adapters.metadata).installPath);
     assert(config.validateGame(Object.assign({}, game, { capabilities: { skipPatchCheck: true } }), lib, adapters.metadata).capabilities);
     assert.throws(() => config.decode(Buffer.from('{')), /配置/);
-    assert.throws(() => config.decode(Buffer.from(JSON.stringify({ schemaVersion: 2 }))), /版本/);
+    assert.throws(() => config.decode(Buffer.from(JSON.stringify({ schemaVersion: 3 }))), /版本/);
+    const policy={version:1,profileId:'tyrano-file-v1',projectId:'fixture_save',evidenceHash:'a'.repeat(64),location:'install',directoryIdentity:{realPath:root,dev:'1',ino:'2'},backupId:'backup-test',otherSnapshot:{exists:false},hadSaves:true};
+    const policyStore=config.createStore(path.join(tmp,'policy-store'),()=>JSON.parse(JSON.stringify(lib)),adapters.metadata);
+    const policyFirst=policyStore.read(true),beforePolicy=fs.readFileSync(policyStore.file);
+    policyStore.read();assert.deepStrictEqual(fs.readFileSync(policyStore.file),beforePolicy);
+    const enabled=policyStore.saveGame({revision:policyFirst.library.revision,token:policyFirst.token,game:Object.assign({},game,{savePolicy:policy})});
+    assert.strictEqual(enabled.library.schemaVersion,2);
+    assert.deepStrictEqual(fs.readFileSync(policyStore.file+'.v1-original'),beforePolicy);
+    assert.deepStrictEqual(enabled.library.games[0].savePolicy,policy);
+    const edited=policyStore.saveGame({revision:enabled.library.revision,token:enabled.token,game:Object.assign({},enabled.library.games[0],{name:'edited'})});
+    assert.deepStrictEqual(edited.library.games[0].savePolicy,policy);
+    const missingPolicy=Object.assign({},edited.library.games[0]);delete missingPolicy.savePolicy;
+    const keptPolicy=policyStore.saveGame({revision:edited.library.revision,token:edited.token,game:missingPolicy});
+    assert.deepStrictEqual(keptPolicy.library.games[0].savePolicy,policy,'Ordinary editing must not drop save policy');
+    const beforeRollback=fs.readFileSync(policyStore.file);fs.writeFileSync(policyStore.file+'.bak',beforePolicy);
+    const rolledBack=policyStore.restore(keptPolicy.token);assert.strictEqual(rolledBack.library.schemaVersion,1);assert(!rolledBack.library.games[0].savePolicy);
+    assert.deepStrictEqual(fs.readFileSync(policyStore.file),beforePolicy);
+    assert(fs.readdirSync(path.dirname(policyStore.file)).filter(n=>n.startsWith('library.json.failed-')).some(n=>fs.readFileSync(path.join(path.dirname(policyStore.file),n)).equals(beforeRollback)));
+
+
+    assert(config.validateGame(Object.assign({},game,{savePolicy:{version:100}}),Object.assign({},lib,{schemaVersion:2}),adapters.metadata).savePolicy);
+    assert.throws(()=>config.decode(Buffer.from(JSON.stringify(Object.assign({},lib,{schemaVersion:3})))),e=>e.code==='CONFIG_VERSION_UNSUPPORTED');
+    console.log('PASS: save policy v1/v2 upgrade, original retention and invalid policy rejection');
     assert.throws(() => launch.parseArgs(['--library', '--game=/tmp/game']), e=>e.code==='ARGS_INVALID');
     assert.throws(() => launch.testRoot(path.resolve(__dirname, '..'), root, [root]), /测试/);
     assert(config.validateGame(Object.assign({}, game, { adapterId: 'unknown' }), lib, adapters.metadata).adapterId);
@@ -82,12 +126,13 @@ function remove(p) {
     console.log('PASS: write/backup/fsync/close/rename faults, raw record retention, 100 records');
     console.log('PASS: recoverable configuration');
     assert(config.validateGame(Object.assign({}, game, { adapterId: 'constructor' }), lib, adapters.metadata).adapterId);
-    const env = launch.cleanEnv({ ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '-e bad', PATH: '/bin' });
-    assert.strictEqual(env.ELECTRON_RUN_AS_NODE, undefined); assert.strictEqual(env.PATH, '/bin');
+    const env = launch.cleanEnv({ ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '-e bad', PATH: '/bin', LAUNCHER_SAVE_CONTEXT:'/untrusted' });
+    assert.strictEqual(env.ELECTRON_RUN_AS_NODE, undefined); assert.strictEqual(env.PATH, '/bin');assert.strictEqual(env.LAUNCHER_SAVE_CONTEXT,undefined);
     const descriptor = adapters.describe(game, runtime, { root: tmp, dataRoot: path.join(tmp, 'data') });
     assert.strictEqual(descriptor.argv[descriptor.argv.length - 1], root);
     assert.deepStrictEqual(descriptor.argv,['--user-data-dir='+descriptor.userData,root]);
     assert.strictEqual(descriptor.cwd, root);
+    assert.deepStrictEqual(adapters.describe(Object.assign({},game,{savePolicy:null}),runtime,{root:tmp,dataRoot:path.join(tmp,'data')}),descriptor,'Explicit disable must retain ordinary argv/cwd/userData');
     const fakeProbe = (exe, args, options, cb) => cb(null, 'LAUNCHER_RUNTIME:' + JSON.stringify({ version: '26.6.10', arch: 'x64', platform: 'darwin' }), '');
     const probed = await launch.inspectRuntime(process.execPath, fakeProbe);
     assert.strictEqual(probed.version, '26.6.10');
@@ -130,9 +175,48 @@ function remove(p) {
     const runner=new launch.Runner(async()=>runtime,(exe,argv,options)=>{spawned={exe,argv,options};return child;});
     const stages=[];runner.on('state',s=>stages.push(s.phase));
     const runContext={root:tmp,dataRoot:path.join(tmp,'runner'),logRoot:path.join(tmp,'logs')};
-    await runner.start(game,runtime,runContext);assert(runner.busy);assert.strictEqual(spawned.options.shell,false);
+    await runner.start(game,runtime,runContext);assert(runner.busy);assert.strictEqual(spawned.options.shell,false);assert.strictEqual(spawned.options.stdio.length,3);assert.strictEqual(spawned.options.stdio[0],'ignore');assert.strictEqual(typeof spawned.options.stdio[1],'number');assert.strictEqual(spawned.options.stdio[2],spawned.options.stdio[1]);assert.strictEqual(spawned.options.env.LAUNCHER_SAVE_CONTEXT,undefined);
     await assert.rejects(runner.start(game,runtime,runContext),e=>e.code==='ALREADY_RUNNING');
     child.emit('close',0,null);assert(!runner.busy);assert.deepStrictEqual(stages,['validating','starting','running','exited']);
+    const adaptedContext={root:tmp,dataRoot:path.join(tmp,'adapted-runner'),logRoot:path.join(tmp,'adapted-logs')};
+    const fixturePkg=path.join(profileRoot,'package.json');const fixturePackage=JSON.parse(fs.readFileSync(fixturePkg));fixturePackage.devDependencies.electron=runtime.version;fixturePackage.cpu=['x64'];fs.writeFileSync(fixturePkg,JSON.stringify(fixturePackage));fs.mkdirSync(path.join(profileRoot,'resources'));
+    const adaptedGame=Object.assign({},game,{id:'game-adapted',installPath:profileRoot});
+    const adaptedLibrary={schemaVersion:2,revision:0,games:[adaptedGame],runtimes:[runtime]};
+    const saveService=require('../core/save-policy').create(adaptedContext,{inspect:adapters.inspectSaveProfile,validate:adapters.validateSaveBytes});
+    const saveState={token:'unit',library:adaptedLibrary},saveScan=saveService.inspect(adaptedGame,saveState);
+    adaptedGame.savePolicy=saveService.apply(adaptedGame,{enabled:true,location:'install',scanToken:saveScan.scanToken},saveState);adaptedContext.library=adaptedLibrary;
+    const adaptedChild=new (require('events'))();adaptedChild.pid=456;adaptedChild.stdio=[null,null,null,new (require('stream').PassThrough)()];adaptedChild.kill=()=>{adaptedChild.killed=true;return true;};
+    let adaptedSpawn;const adaptedRunner=new launch.Runner(async()=>runtime,(exe,argv,options)=>{adaptedSpawn={exe,argv,options};return adaptedChild;});
+    const adaptedStages=[];adaptedRunner.on('state',v=>adaptedStages.push(v.phase));
+    await adaptedRunner.start(adaptedGame,runtime,adaptedContext);
+    assert.strictEqual(adaptedSpawn.options.stdio[3],'pipe');assert(adaptedSpawn.argv.includes('--require'));assert(!adaptedStages.includes('running'),'PID is not adapter-ready');
+    const launchDescription=JSON.parse(fs.readFileSync(adaptedSpawn.options.env.LAUNCHER_SAVE_CONTEXT));
+    const frame=(phase,generation)=>JSON.stringify({type:'save-adapter',gameId:adaptedGame.id,nonce:launchDescription.nonce,documentGeneration:generation,phase})+'\n';
+    const adapting=frame('adapting',1);adaptedChild.stdio[3].write(adapting.slice(0,12));adaptedChild.stdio[3].write(adapting.slice(12));
+    adaptedChild.stdio[3].write(frame('adapter-ready',0));assert(!adaptedStages.includes('running'),'Old document cannot release new document');
+    adaptedChild.stdio[3].write(frame('adapter-ready',1));assert.strictEqual(adaptedStages[adaptedStages.length-1],'running');
+    adaptedChild.stdio[3].write('x'.repeat(8193));assert(adaptedChild.killed);assert(adaptedRunner.busy,'Do not release busy before child exit');
+    adaptedChild.emit('close',1,null);assert(!adaptedRunner.busy);assert.strictEqual(adaptedStages[adaptedStages.length-1],'failed');
+    assert(!fs.existsSync(adaptedSpawn.options.env.LAUNCHER_SAVE_CONTEXT));
+    for(const fault of ['json','nonce','early-ready','eof','timeout']) {
+      const eventChild=new (require('events'))();eventChild.pid=789;eventChild.stdio=[null,null,null,new (require('stream').PassThrough)()];eventChild.kill=()=>{eventChild.killed=true;return true;};
+      let eventOptions;const eventRunner=new launch.Runner(async()=>runtime,(_exe,_argv,options)=>{eventOptions=options;return eventChild;});
+      const schedule=global.setTimeout;let expired;
+      try {
+        if(fault==='timeout')global.setTimeout=(fn,ms)=>{if(ms===10000){expired=fn;return schedule(()=>{},60000);}return schedule(fn,ms);};
+        await eventRunner.start(adaptedGame,runtime,adaptedContext);
+      }finally{global.setTimeout=schedule;}
+      if(fault==='json')eventChild.stdio[3].write('{invalid}\n');
+      if(fault==='nonce')eventChild.stdio[3].write(JSON.stringify({type:'save-adapter',gameId:adaptedGame.id,nonce:'bad',documentGeneration:1,phase:'adapting'})+'\n');
+      if(fault==='early-ready'){const launchContext=JSON.parse(fs.readFileSync(eventOptions.env.LAUNCHER_SAVE_CONTEXT));eventChild.stdio[3].write(JSON.stringify({type:'save-adapter',gameId:adaptedGame.id,nonce:launchContext.nonce,documentGeneration:0,phase:'adapter-ready'})+'\n');}
+      if(fault==='eof'){eventChild.stdio[3].end();await new Promise(resolve=>setImmediate(resolve));}
+      if(fault==='timeout')expired();
+      assert(eventChild.killed,fault);assert(eventRunner.busy,fault+' must await actual exit');eventChild.emit('close',1,null);assert(!eventRunner.busy);
+      assert(!fs.existsSync(eventOptions.env.LAUNCHER_SAVE_CONTEXT));
+    }
+    assert.strictEqual(launch.cleanEnv({LAUNCHER_SAVE_CONTEXT:'/synthetic/stale'}).LAUNCHER_SAVE_CONTEXT,undefined);
+    assert(config.validateGame(Object.assign({},game,{args:['--require=untrusted']}),lib,adapters.metadata).args);
+    console.log('PASS: adapted entry, bounded status pipe, generations and exit-held busy state');
     const changedProbe=new launch.Runner(async()=>Object.assign({},runtime,{version:'8.0.0'}));
     await assert.rejects(changedProbe.start(game,runtime,runContext),e=>e.code==='RUNTIME_MISMATCH');assert(!changedProbe.busy);
     const failedSpawn=new launch.Runner(async()=>runtime,()=>{throw Error('cannot spawn');});

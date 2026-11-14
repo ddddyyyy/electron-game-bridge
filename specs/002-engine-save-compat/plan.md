@@ -51,9 +51,9 @@ specs/002-engine-save-compat/
 └── checklists/requirements.md
 ```
 
-后续由 speckit-tasks 生成 tasks.md，本阶段不生成任务清单。
+实施任务与完成状态见 [tasks.md](tasks.md)，证据见 [validation.md](validation.md)。
 
-### Source Code (planned changes)
+### Source Code
 
 ```text
 adapters/
@@ -113,3 +113,11 @@ README.md / AGENTS.md
 | FR-013 | 游戏原清档流程、操作前备份、清档状态/存在记录同步、中断恢复及新进度回归 |
 | FR-014 | 逐页面代次重新接入、旧消息失效、刷新/重载后同目录续玩 |
 | SC-001—SC-007 | quickstart 的真实样本续玩、合成故障矩阵、未选集合不变与普通应用对照 |
+
+## 实施核对
+
+沿用本计划的三层内置适配边界。profile 对存储及清档方法做函数摘要核对，页面赋值时再次核对；Tyrano 500 的系统变量重置与 520 的完整删除分别有明确键范围，不将缺少删除方法视作故障。受控存储经子主进程固定 IPC 进入共享事务层；核心只接收通用键和文件名，不判断游戏名称或引擎对象。
+
+配置提交、初始备份、pre-clear 备份、pendingClear 和新键存在记录均已实现。恢复未完成清档须与操作前完整副本一致，才能重新确认。私有备份/存在目录拒绝链接别名，存档槽格式在扫描和保存时核对。旧版 Electron 在窗口构造中同步退出会原生崩溃，因此先锁住操作并结束当前回调，再退出；隔离用例明确核对受控退出码。
+
+这些细节未引入新依赖或用户入口。真实样本、双版本、恢复和未验证范围持续记录在 validation.md。
