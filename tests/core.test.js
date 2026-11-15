@@ -43,6 +43,11 @@ function remove(p) {
     const secondRoot=path.join(tmp,'profile second');require('./save-hook-smoke').copy(path.join(__dirname,'fixtures/tyrano-save'),secondRoot);require('./save-hook-smoke').variant(secondRoot,'fixture_second');
     const secondProfile=adapters.inspectSaveProfile?adapters.inspectSaveProfile(Object.assign({},recognitionGame,{installPath:secondRoot})):{status:'unsupported'};
     assert.strictEqual(secondProfile.status,'supported');assert.strictEqual(secondProfile.profile.layout,'tyrano','Prototype-style clear boundary must be recognized');
+    assert(secondProfile.profile.saveIdentity.initMethodHash);assert(secondProfile.profile.saveIdentity.pathMethodHash);
+    for(const [name,from,to]of [['engine-layout.js','Save identity mismatch','Changed identity check'],['storage.js',"join(__dirname,'resources')","join(__dirname,'elsewhere')"]]) {
+      const file=path.join(secondRoot,name),source=fs.readFileSync(file,'utf8');fs.writeFileSync(file,source.replace(from,to));
+      assert.strictEqual(adapters.inspectSaveProfile(Object.assign({},recognitionGame,{installPath:secondRoot})).status,'unsupported','Unknown identity methods must not be trusted');fs.writeFileSync(file,source);
+    }
     console.log('PASS: bounded engine profile recognition, declarations and source evidence');
     assert.throws(() => launch.parseArgs(['--library-smoke-test']), /测试|test/i);
     assert.throws(() => launch.parseArgs(['--unknown']), /参数/);

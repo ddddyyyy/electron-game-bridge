@@ -49,6 +49,7 @@ try {
       if(!storage||!input||input.documentGeneration!==item.generation)throw Error('存档操作来源无效');
       let value;
       if(input.operation==='read')value=storage.read(input.key);
+      else if(input.operation==='read-confirmed')value=storage.readConfirmed(input.key);
       else if(input.operation==='write')value=storage.write(input.key,input.value);
       else if(input.operation==='begin-clear'){const boundary=context.profile.clearBoundaries.find(b=>b.name===input.boundary);if(!boundary)throw Error('清档边界无效');value=storage.beginClear(boundary.keys);}
       else if(input.operation==='remove')value=storage.remove(input.key);

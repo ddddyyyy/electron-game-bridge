@@ -108,18 +108,27 @@ $('game-form').onsubmit=async event=>{
 };
 $('launch').onclick=async()=>{if(busy||!selected)return;setBusy(true);try{await window.launcher.launchGame(selected);}catch(error){setBusy(false);fail(error);}};
 window.launcher.onLaunchState(value=>{setBusy(['validating','starting','adapting','running'].includes(value.phase));if(current())$('game-status').textContent=busy?'游戏进程处理中':'游戏已停止';message(value.message||({validating:'正在检查游戏与运行环境…',starting:'正在启动…',exited:'游戏已退出。'}[value.phase]||value.phase),value.phase==='failed');});
+function showSaveLocation(){
+  $('save-current-path').textContent=saveBase?saveBase.directoryIdentity.realPath:'由游戏自行决定（未指定位置）';
+  const chosen=savePreview&&document.querySelector('input[name="save-location"]:checked');
+  const candidate=chosen&&savePreview.candidates.find(c=>c.location===chosen.value);
+  $('save-next-path').textContent=!$('save-enabled').checked?'由游戏自行决定（不使用指定位置）':
+    !saveDirty&&saveBase?saveBase.directoryIdentity.realPath:
+    candidate?candidate.displayPath:'尚未选择，请检查存档位置并选择一个文件夹。';
+}
 function resetSaveForm(game){
   saveSequence++;savePreview=null;saveDirty=false;saveBase=game&&game.savePolicy;
   $('save-enabled').checked=!!saveBase;$('save-enabled').disabled=!saveBase;$('save-candidates').textContent='';$('save-status').textContent='';
-  $('save-inspection').textContent=saveBase?'已启用，当前存档位置：'+saveBase.directoryIdentity.realPath:'先检查游戏是否支持文件存档兼容。';
+  $('save-inspection').textContent=saveBase?'已启用指定位置，可重新检查并更换。':'先检查游戏是否支持指定存档位置。';
+  showSaveLocation();
 }
 function invalidateSavePreview(){
   if(!savePreview)return;savePreview=null;saveSequence++;
   if($('save-enabled').checked)saveDirty=true;
-  $('save-candidates').textContent='';$('save-inspection').textContent='设置已变化，请重新检查存档位置。';
+  $('save-candidates').textContent='';$('save-inspection').textContent='设置已变化，请重新检查存档位置。';showSaveLocation();
 }
 ['name','install','icon','entry','cwd','args'].forEach(id=>$(id).addEventListener('input',invalidateSavePreview));
-$('save-enabled').onchange=()=>{saveDirty=true;};
+$('save-enabled').onchange=()=>{saveDirty=true;showSaveLocation();};
 $('inspect-saves').onclick=async()=>{
   if(busy||saving||registering)return;const sequence=++saveSequence;
   $('save-inspection').textContent='正在检查存档位置…';$('inspect-saves').disabled=true;
@@ -127,16 +136,16 @@ $('inspect-saves').onclick=async()=>{
     const preview=await window.launcher.inspectSavePolicy({revision:state.library.revision,token:state.token,game:formGame()});
     if(sequence!==saveSequence||$('settings-panel').hidden)return;
     savePreview=preview;editingId=preview.gameId;$('save-enabled').disabled=false;
-    $('save-inspection').textContent='支持文件存档兼容，请确认要使用的位置。';$('save-candidates').textContent='';
+    $('save-inspection').textContent='这款游戏支持指定存档位置，请选择要读取和保存进度的文件夹。';$('save-candidates').textContent='';
     const empty=preview.candidates.every(c=>!c.files.length);
     preview.candidates.forEach(candidate=>{
       const label=document.createElement('label');label.className='save-choice';
-      const radio=document.createElement('input');radio.type='radio';radio.name='save-location';radio.value=candidate.location;radio.disabled=!candidate.exists;radio.checked=empty&&candidate.location==='install';radio.onchange=()=>{saveDirty=true;};
+      const radio=document.createElement('input');radio.type='radio';radio.name='save-location';radio.value=candidate.location;radio.disabled=!candidate.exists;radio.checked=empty&&candidate.location==='install';radio.onchange=()=>{saveDirty=true;showSaveLocation();};
       const text=document.createElement('span');text.textContent=(candidate.location==='install'?'游戏目录':'资源目录')+'：'+candidate.displayPath;
       const files=document.createElement('small');files.textContent=candidate.files.length?candidate.files.map(f=>f.name+' · '+new Date(f.mtime).toLocaleString()).join('\n'):'没有旧存档'+(candidate.exists?'':'（目录不存在）');text.append(files);label.append(radio,text);$('save-candidates').append(label);
     });
   }catch(error){if(sequence===saveSequence){savePreview=null;$('save-enabled').disabled=!saveBase;$('save-inspection').textContent=error.message;}}
-  finally{if(sequence===saveSequence)setBusy(busy);}
+  finally{if(sequence===saveSequence){showSaveLocation();setBusy(busy);}}
 };
 function saveChoice(){
   if(!saveDirty)return undefined;

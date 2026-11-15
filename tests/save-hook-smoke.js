@@ -102,11 +102,21 @@ async function run(executable,options) {
   const saveGame={id:'game-fixture',installPath:game,entry:'.',workingDirectory:'.',adapterId:'electron-app',args:[]};
   const library={schemaVersion:2,revision:0,games:[saveGame],runtimes:[]};
   const service=require('../core/save-policy').create(saveContext,{inspect:require('../adapters').inspectSaveProfile,validate:require('../adapters').validateSaveBytes});
+  const slotFile=path.join(game,projectId+'_tyrano_data.sav');
+  if(options.layout)fs.writeFileSync(slotFile,escape(JSON.stringify({kind:'save',hash:'confirmed-root-identity',data:[]})));
+  const slotBytes=options.layout?fs.readFileSync(slotFile):null;
   const state={token:'fixture',library},scan=service.inspect(saveGame,state);
   saveGame.savePolicy=service.apply(saveGame,{enabled:true,location:'install',scanToken:scan.scanToken},state);
   const description=JSON.parse(fs.readFileSync(contextFile));Object.assign(description,{game:saveGame,library,context:saveContext});fs.writeFileSync(contextFile,JSON.stringify(description));
   const saved=await adapted('save');assert.deepStrictEqual(saved.result.after,{progress:2},'Protected save must persist new progress');
   const resumed=await adapted();assert.deepStrictEqual(resumed.result.old,{progress:2});
+  if(options.layout) {
+    assert.deepStrictEqual(fs.readFileSync(slotFile),slotBytes,'Origin binding must not rewrite confirmed save data');
+    fs.writeFileSync(slotFile,escape(JSON.stringify({kind:'save',hash:'unconfirmed-external-identity',data:[]})));
+    const unexpected=fs.readFileSync(slotFile);await rejected();assert.deepStrictEqual(fs.readFileSync(slotFile),unexpected,'Changed origin must not be silently trusted');
+    fs.writeFileSync(slotFile,slotBytes);
+    console.log('PASS: existing userData origin switches only to the confirmed backup; changed origin is rejected without rewriting saves');
+  }
   await adapted('cancel-clear');assert(fs.existsSync(rootSave));
   await adapted('clear');assert.strictEqual(fs.existsSync(rootSave),options.layout==='legacy');
   const empty=await adapted('reload');assert.deepStrictEqual(empty.result.old,options.layout==='legacy'?{}:null);

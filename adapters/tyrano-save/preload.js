@@ -11,7 +11,7 @@
     const context=ipc.sendSync('launcher-save:init');
     if(!context||context.error)throw Error('无法验证存档启动描述');
     const methods=context.profile.requiredMethods,assigned=new Set();
-    let installed=false,poisoned=false;const clearAssigned=new Set();
+    let installed=false,poisoned=false,identityAssigned=!context.game||!context.profile.saveIdentity;const clearAssigned=new Set();
     function fail(error){poisoned=true;fatal(error);}
     function filename(key) {
       if(poisoned||!installed)throw Error('存档保护未就绪');
@@ -36,7 +36,7 @@
     }
     function protectedCall(operation,details){try{return invoke(operation,details);}catch(error){fail(error);}}
     function ready() {
-      if(installed||assigned.size!==methods.length||(context.game&&clearAssigned.size!==context.profile.clearBoundaries.length))return;
+      if(installed||!identityAssigned||assigned.size!==methods.length||(context.game&&clearAssigned.size!==context.profile.clearBoundaries.length))return;
       installed=true;context.profile.keys.forEach(key=>read(key));
       if(!ipc.sendSync('launcher-save:ready',context.documentGeneration))fail(Error('存档就绪报告失败'));
     }
@@ -60,6 +60,27 @@
         };
         ready();return wrapped;
       }));
+      if(context.profile.saveIdentity)observe(target,'init_game',value=>{
+        if(typeof value!=='function'||identityAssigned||hashFunction(value)!==context.profile.saveIdentity.initMethodHash)throw Error('存档来源校验初始化方法无法核对');
+        identityAssigned=true;ready();
+        return function () {
+          try {
+            if(this.config.projectID!==context.profile.projectId||hashFunction($.getExePath)!==context.profile.saveIdentity.pathMethodHash)throw Error('存档来源校验路径无法核对');
+            const key=this.config.projectID+'_tyrano_data',saved=JSON.parse(read(key)||'null');
+            if(saved) {
+              if(typeof saved.hash!=='string'||!saved.hash||saved.hash.length>1024)throw Error('存档来源标识无效，请先核对存档');
+              const storageKey=process.execPath.indexOf('var/folders')!==-1?this.config.projectID+'_save_key':$.getExePath()+'_'+this.config.projectID;
+              if(localStorage.getItem(storageKey)!==saved.hash) {
+                const confirmed=JSON.parse(invoke('read-confirmed',{key})||'null');
+                if(!confirmed||confirmed.hash!==saved.hash)throw Error('存档来源标识已变化，请停止游戏后重新检查并确认存档位置');
+                // Only the explicitly confirmed backup can rebind this one origin key.
+                localStorage.setItem(storageKey,saved.hash);
+              }
+            }
+          }catch(error){return fail(error);}
+          return value.apply(this,arguments);
+        };
+      });
       return target;
     }
     if(context.game) {

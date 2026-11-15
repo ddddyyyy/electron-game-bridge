@@ -201,6 +201,11 @@ function create(context,options) {
       }
       return options.validate(readFile(file),name);
     });}
+    function readConfirmed(key) {return run(()=>{
+      const name=nameFor(key),manifest=verifyBackup(game,policy);
+      if(!manifest.files.some(item=>item.name===name))return null;
+      return options.validate(readFile(path.join(privateDirectory(game,['save-backups',policy.backupId,'files']),name)),name);
+    });}
     function write(key,value) {return run(state=>{
       const name=nameFor(key),file=path.join(directory,name);
       if(state.pendingClear&&!state.pendingClear.affectedKeys.includes(name))throw Error('清档操作越出已确认范围');
@@ -235,7 +240,7 @@ function create(context,options) {
       const current=scanDirectory(directory,profile);
       state.seenKeys=current.files.map(f=>f.name);delete state.pendingClear;atomicJSON(record,state);return true;
     });}
-    return {read,write,beginClear,remove,finishClear,validate:()=>run(state=>{if(state.pendingClear)throw Error('清档操作未完成');return validate(game,library);})};
+    return {read,readConfirmed,write,beginClear,remove,finishClear,validate:()=>run(state=>{if(state.pendingClear)throw Error('清档操作未完成');return validate(game,library);})};
   }
   return {inspect,apply,validate,openSession,clearTokens:()=>tokens.clear(),backup,atomicJSON,identity,scan,verifyBackup,presencePath};
 }

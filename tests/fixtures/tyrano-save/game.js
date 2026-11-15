@@ -2,6 +2,7 @@ const fixtureFS=require('fs');
 const fixturePath=require('path');
 const fixtureAction=window.fixtureOptions.action;
 const fixtureRoot=window.fixtureOptions.root;
+if(window.tyrano){localStorage.setItem('fixture-unrelated','keep');tyrano.plugin.kag.init_game();if(localStorage.getItem('fixture-unrelated')!=='keep')throw Error('Unrelated userData changed');}
 const fixtureResult={preload:window.fixtureOriginalPreload,old:JSON.parse($.getStorageFile('fixture_save_sf')||'null')};
 if(fixtureAction==='save')$.setStorageFile('fixture_save_sf',{progress:2});
 if(fixtureAction==='clear')window.fixtureClear(true);

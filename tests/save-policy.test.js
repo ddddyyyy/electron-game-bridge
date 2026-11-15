@@ -77,7 +77,11 @@ try {
   sessionCase.game.savePolicy=apply(sessionCase,'install');
   const session=sessionCase.service.openSession(sessionCase.game,sessionCase.state.library);
   assert.deepStrictEqual(JSON.parse(session.read('fixture_save_sf')),{progress:10});
+  assert.deepStrictEqual(JSON.parse(session.readConfirmed('fixture_save_sf')),{progress:10});
   session.write('fixture_save_sf',{progress:11});assert.deepStrictEqual(JSON.parse(session.read('fixture_save_sf')),{progress:11});
+  assert.deepStrictEqual(JSON.parse(session.readConfirmed('fixture_save_sf')),{progress:10},'Confirmation reads the completed backup, not mutable current saves');
+  assert.strictEqual(session.readConfirmed('fixture_save_tyrano_data'),null);
+  assert.throws(()=>sessionCase.service.openSession(sessionCase.game,sessionCase.state.library).readConfirmed('../outside'),/不支持/);
   session.beginClear(['fixture_save_sf']);session.remove('fixture_save_sf');session.finishClear();
   assert.strictEqual(session.read('fixture_save_sf'),null);assert(sessionCase.service.validate(sessionCase.game,sessionCase.state.library));
   session.write('fixture_save_sf',{progress:12});assert.deepStrictEqual(JSON.parse(session.read('fixture_save_sf')),{progress:12});

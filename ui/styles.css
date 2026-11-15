@@ -4,3 +4,5 @@
 .actions{gap:0}.actions>*+*{margin-left:12px}.badges{gap:0}.badge{margin-right:8px;margin-bottom:6px}.brand-icon{margin-right:5px}.picker{gap:0}.picker button{margin-left:8px}.game.selected{outline:0;box-shadow:0 0 0 3px #f8f5ef,0 0 0 5px #60854c}
 
 .save-compat{margin:0 0 18px;background:#fafbf6}.check-row{display:flex;align-items:center;margin:16px 0 10px}.check-row input,.save-choice input{width:16px;flex:none;margin:0 9px 0 0}.save-choice{display:flex;align-items:flex-start;padding:12px;border:1px solid var(--line);border-radius:9px;margin:10px 0;background:#fff}.save-choice span{min-width:0;overflow-wrap:anywhere}.save-choice small{display:block;margin-top:6px;color:var(--muted);line-height:1.6;white-space:pre-wrap}#save-status{font-size:12px;color:var(--muted);white-space:pre-wrap}
+
+.save-location{padding:12px;background:#f0f3e9;border-radius:8px;margin:12px 0;font-size:12px;line-height:1.7}.save-location strong,.save-location span,.save-location output,.save-location small{display:block;overflow-wrap:anywhere}.save-location strong{color:#547044;margin-bottom:4px}

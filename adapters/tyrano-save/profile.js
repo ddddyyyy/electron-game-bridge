@@ -36,6 +36,8 @@ function functionText(source,pattern) {
 function functionHash(text) {return text&&config.sha(Buffer.from(text.replace(/\r\n/g,'\n').trim()));}
 // Verified storage implementations; hashes keep game source out of this repo.
 const signatures={
+  init_game:['4e5bb476813b07e72061980fede75b78edf10707fb2fee3f7fe9cb29cd08963a','68500a19c285d6438f7000111b9509e908d165eb13f2fd289892ce48a9568b9d','b5cbb1018c50a75aa1ec81293a1de598988783bba08883759258c56f7449aa1d'],
+  getExePath:['073958f9f6cc2d794872850211a687b2a289c4b1a9d497e38c56aa699ed88a4f','7c227a81f990d15d6398dea7d7f758ea5059500a8874de73e8004b1c1be4af14','4a92c5e664fb3fec005a5641e6e6724319d9bd6158886b23931c840004c990f8'],
   localFilePath:['9a079961b29c984eab8374ddec638fc84153839e7f28a3885b24af0aef21bd5d','edb58227c642dd0d186de49f9057e632f74de6244157d5befe7f087b94d22cc8'],
   getStorageFile:['703b0f35b7b5a77cb6b388e07ff5966fa54645e79dae6e1f35081dd5d1bea576','9e752131dbce12e383f07e4c2be5ebd41182341b1ed41185a0ade038940f8d0a','73a2d9f5f4f25df7a650abb4f7bba6ee2268eaadf28fb0f6a2c4cba24accbff5'],
   setStorageFile:['eefc6ce12b4fedd8d97e852e80312a606c5935822df3e4372f0c8d248645eaca','702df7f7402ec9def6c1161bcaa344c449140218753eea2f7f8cbd6fc61c7f3b'],
@@ -81,9 +83,10 @@ function inspect(game) {
       if(body||name!=='removeStorageFile')methodHashes[name]=verifiedHash(name,body);
     });
     const engineSource=sources.find(text=>/tyrano\.plugin\.kag\s*=/.test(text));
-    const boundaries=[];let layout='fixture';
+    const boundaries=[];let layout='fixture',saveIdentity=null;
     if(engineSource) {
       layout='tyrano';
+      saveIdentity={initMethodHash:verifiedHash('init_game',functionText(engineSource,/\binit_game\s*:\s*function/)),pathMethodHash:verifiedHash('getExePath',functionText(storage,/\$\.getExePath\s*=\s*function/))};
       if(!/version\s*:\s*(?:500|520)\b/.test(engineSource))throw Error('引擎版本尚未验证');
       ['removeSaveData','clearVariable'].forEach(name=>{
         const body=functionText(engineSource,new RegExp('\\b'+name+'\\s*:\\s*function'));
@@ -95,7 +98,7 @@ function inspect(game) {
       boundaries.push({name:'fixtureClear',methodHash:verifiedHash('fixtureClear',body),keys:[projectId+'_sf'],confirmationBoolean:true});
     }
     const evidence=[mainSource,html,settings].concat(sources);
-    return {status:'supported',profile:{profileId:'tyrano-file-v1',projectId,entry,page,storageFile:scripts[storageIndex],evidenceHash:config.sha(Buffer.from(evidence.join('\0'))),keys,fileNames:keys.map(key=>key+'.sav'),filePrefix:projectId+'_',fileExtension:'.sav',requiredMethods:Object.keys(methodHashes),methodHashes,layout,clearBoundaries:boundaries,clearKeys:boundaries[0].keys,clearSets:boundaries.map(b=>b.keys)}};
+    return {status:'supported',profile:{profileId:'tyrano-file-v1',projectId,entry,page,storageFile:scripts[storageIndex],evidenceHash:config.sha(Buffer.from(evidence.join('\0'))),keys,fileNames:keys.map(key=>key+'.sav'),filePrefix:projectId+'_',fileExtension:'.sav',requiredMethods:Object.keys(methodHashes),methodHashes,layout,saveIdentity,clearBoundaries:boundaries,clearKeys:boundaries[0].keys,clearSets:boundaries.map(b=>b.keys)}};
   }catch(error){return {status:'unsupported',code:'SAVE_UNSUPPORTED',message:error.message};}
 }
 function validateSaveBytes(bytes,name) {
