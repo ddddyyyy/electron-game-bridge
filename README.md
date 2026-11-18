@@ -3,7 +3,7 @@
 在 macOS 上运行仅提供 Windows EXE 发行包的 Electron 游戏。
 
 项目面向游戏没有提供 macOS 版本、但 Windows 发行目录中保留了 Electron 应用资源的场景。
-启动器识别游戏所需的 Electron 版本，匹配用户提供的 macOS 运行环境，加载游戏资源及其原始 JavaScript 主入口。
+启动器识别游戏所需的 Electron 版本，匹配本地已登记或从官方安装的 macOS 运行环境，加载游戏资源及其原始 JavaScript 主入口。
 EXE 用于提供版本和架构证据，实际游戏进程由 macOS Electron 运行。
 
 支持本地多游戏管理、独立启动配置和运行数据隔离。默认打开空游戏库；仓库不包含游戏、存档、预设安装目录或 Electron 二进制。
@@ -11,10 +11,10 @@ EXE 用于提供版本和架构证据，实际游戏进程由 macOS Electron 运
 
 ## 适用范围
 
-- 优先支持完整 Windows 发行目录中包含 `resources/app.asar` 的 Electron 游戏。添加游戏时选择整个安装目录，并保留随附 EXE 和其他资源。
+- 支持完整 Windows 发行目录中包含 `resources/app.asar` 或 `resources/app` 的 Electron 游戏；也会识别唯一的下一层打包目录。添加游戏时选择整个安装目录，并保留随附 EXE 和其他资源。
 - 如果只有单个 EXE，且没有当前启动器能够读取的应用资源，本项目不会自动提取该 EXE 中的游戏。
 - 游戏原始主入口、preload 和初始化流程必须能在相应 macOS Electron 中工作。依赖 Windows 专属组件或不兼容原生模块的游戏可能无法运行。
-- 不修改、重打包游戏，不自动下载运行环境，也不承诺 Windows 存档能够跨平台直接续用。
+- 不修改、重打包游戏，也不承诺 Windows 存档能够跨平台直接续用。
 
 ## 启动
 
@@ -29,15 +29,16 @@ LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command
 
 ## 使用
 
-1. 在“运行环境”入口选择电脑上的 Electron.app 或其中的可执行文件，点击“检测并保存”。游戏运行环境就是用于运行游戏的 Electron，版本由程序自动识别。
+1. “运行环境”入口显示已安装的 Electron 版本、关联游戏与可展开的安装路径。同一份程序重复检测会复用原记录；也可选择电脑上的 Electron.app，点击“检测并保存”。
 2. 点击“添加游戏”，填写名称、安装目录和启动设置。图片可选；目录内有 resources/app.asar 时，默认入口 `.` 自动定位该归档。
-3. 程序识别所需精确版本并自动匹配已登记运行环境，不提供手选版本下拉框。选择卡片后，在下方详情启动游戏。
+3. 程序识别所需精确版本并自动匹配；缺少时点击“从官网安装匹配版本”，无需手选版本或下载文件。安装成功后保存游戏设置，再启动游戏。
 4. 游戏停止后才可编辑。点击保存才提交，关闭/取消不保存；独立保存的运行环境登记单独生效。
 
-游戏使用自身的 Electron 主入口、窗口、preload 和初始化流程。普通启动保持原行为；仅明确启用下述存档兼容时，添加固定预载保护，不修改游戏包。
+游戏使用自身的 Electron 主入口、窗口、preload 和初始化流程。启动器会在全部游戏窗口关闭后请求正常退出，等待游戏原有退出/保存回调完成、进程真正结束后恢复操作按钮；不会因为窗口消失就提前解锁。这个通用会话策略通过固定主进程模块接入，保留原始入口和窗口权限；只有明确启用下述存档兼容时才另外添加文件存储保护，不修改游戏包。
 版本证据来自 package.json 中精确的 dependencies/devDependencies.electron，或随附 Windows PE 程序的唯一 Electron 标记及架构。
-只有版本范围、游戏自身版本号、缺失或冲突的证据不会被猜成可用版本；缺少运行环境应另行登记本地文件。
-不自动下载运行环境，也不承诺兼容任意游戏或原生模块。
+只有版本范围、游戏自身版本号、缺失或冲突的证据不会被猜成可用版本，也不会触发猜测下载。不承诺兼容任意游戏或原生模块。
+
+游戏运行环境按精确版本及架构安装到 `.launcher/runtimes/`，多款游戏共享同一安装，存档与设置仍按游戏隔离。从 [Electron 官方 GitHub Releases](https://www.electronjs.org/docs/latest/tutorial/installation) 下载对应 macOS 发行包，以官方 `SHASUMS256.txt` 核对 SHA-256，解包后探测实际版本再登记（首次检查可能需要数十秒，可取消）；已有缓存复用，不覆盖其他版本。下载时显示进度、已下载大小和速度；总大小未知时明确说明。点击“取消下载”会停止传输并清理本次临时文件，可以重新下载。安装独立生效，取消游戏设置不卸载版本；失败不重置已有游戏数据。管理界面的首次启动仍需上述自备 Electron。详见 [运行环境管理规格](specs/003-runtime-management/spec.md)。
 
 ## 数据与恢复
 
@@ -72,6 +73,7 @@ LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command
 ```sh
 node tests/core.test.js
 node tests/save-policy.test.js
+node tests/runtime-manager.test.js
 ```
 
 同时使用自备 Electron 的 Node 模式验证共享代码：
@@ -86,6 +88,8 @@ ELECTRON_RUN_AS_NODE=1 '/path/to/Electron.app/Contents/MacOS/Electron' tests/sav
 ```sh
 LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command --library-smoke-test --test-root='/absolute/isolated/test-directory'
 ```
+
+窗口关闭与进程退出回归：`node tests/lifecycle-smoke.js "/path/to/Electron.app/Contents/MacOS/Electron"`，仅使用自有夹具及新建临时目录。
 
 测试根必须与正式配置和已登记游戏目录分离。没有 npm test 或 lint 脚本。
 

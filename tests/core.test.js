@@ -19,10 +19,22 @@ function remove(p) {
     }
     const binary=path.join(tmp,'runtime.exe');fs.writeFileSync(binary,peFixture('26.6.10'));assert.strictEqual(pe.inspectWindowsElectron(binary).version,'26.6.10');
     fs.writeFileSync(binary,Buffer.from('Electron/26.6.10'));assert.strictEqual(pe.inspectWindowsElectron(binary),null);
+    const nested=path.join(tmp,'wrapped-game'),nestedData=path.join(nested,'payload'),nestedApp=path.join(nestedData,'resources/app');fs.mkdirSync(nestedApp,{recursive:true});
+    fs.writeFileSync(path.join(nestedApp,'package.json'),JSON.stringify({main:'main.js'}));fs.writeFileSync(path.join(nestedData,'engine.exe'),peFixture('43.1.1'));
+    const nestedGame={adapterId:'electron-app',installPath:nested,entry:'.'};
+    assert.strictEqual(require('../adapters').applicationEntry(nestedGame),nestedApp,'Find a single nested unpacked Electron app');
+    assert.strictEqual(require('../adapters').runtimeRequirement(nestedGame).version,'43.1.1');
     const conflicted=peFixture('26.6.10');conflicted.write(' Electron/25.0.0 ',600);fs.writeFileSync(binary,conflicted);assert.throws(()=>pe.inspectWindowsElectron(binary),e=>e.code==='GAME_RUNTIME_CONFLICT');
 
     assert.deepStrictEqual(require('../adapters').defaults(),{schemaVersion:1,revision:0,games:[],runtimes:[]});
     const launch = require('../core/launch');
+    const cleanRoot=path.join(tmp,'owned-cleanup');fs.mkdirSync(path.join(cleanRoot,'A'),{recursive:true});fs.symlinkSync('A',path.join(cleanRoot,'Current'));launch.removeTree(cleanRoot);assert(!fs.existsSync(cleanRoot),'Owned cache cleanup removes dangling symlinks without following them');
+    const archiveRoot=path.join(tmp,'owned-archive-cleanup');cleanupFs.mkdirSync(archiveRoot);
+    const archiveSource=Buffer.from('// owned fixture'),archiveJSON=Buffer.from(JSON.stringify({files:{'default_app.js':{size:archiveSource.length,offset:'0'}}}));
+    const archiveHeaderSize=(8+archiveJSON.length+3)&~3,cleanupArchive=Buffer.alloc(8+archiveHeaderSize+archiveSource.length);
+    cleanupArchive.writeUInt32LE(4,0);cleanupArchive.writeUInt32LE(archiveHeaderSize,4);cleanupArchive.writeUInt32LE(archiveHeaderSize-4,8);cleanupArchive.writeUInt32LE(archiveJSON.length,12);archiveJSON.copy(cleanupArchive,16);archiveSource.copy(cleanupArchive,8+archiveHeaderSize);
+    cleanupFs.writeFileSync(path.join(archiveRoot,'default_app.asar'),cleanupArchive);
+    launch.removeTree(archiveRoot);assert(!cleanupFs.existsSync(archiveRoot),'Remove real ASAR files, not virtual archive entries');
     const adapters = require('../adapters');
     const profileRoot=path.join(tmp,'profile 日本語');
     require('./save-hook-smoke').copy(path.join(__dirname,'fixtures/tyrano-save'),profileRoot);
@@ -99,6 +111,10 @@ function remove(p) {
     const changed = store.saveGame({ revision: first.library.revision, token: first.token, game: Object.assign({}, game, { name: '新名称' }) });
     assert.strictEqual(store.read().library.games[0].name, '新名称');
     assert.throws(() => store.saveGame({ revision: 0, token: first.token, game }), /配置已变化/);
+    const duplicateRuntime=store.saveRuntime({revision:changed.library.revision,token:changed.token,runtime:Object.assign({},runtime,{id:undefined})});
+    assert.strictEqual(duplicateRuntime.library.runtimes.length,changed.library.runtimes.length,'Repeated probing must reuse the runtime');assert.strictEqual(duplicateRuntime.savedRuntimeId,runtime.id);assert.strictEqual(duplicateRuntime.token,changed.token);
+    const malformedStore=config.createStore(path.join(tmp,'runtime-raw-record'),()=>Object.assign({},lib,{runtimes:[Object.assign({},runtime,{id:'../invalid'}),runtime]}),adapters.metadata);
+    const malformedState=malformedStore.read(true),reused=malformedStore.saveRuntime({revision:malformedState.library.revision,token:malformedState.token,runtime:Object.assign({},runtime,{id:undefined})});assert.strictEqual(reused.savedRuntimeId,runtime.id);assert.strictEqual(reused.library.runtimes.length,2,'Keep old malformed records without reusing their IDs');
     const goodBackup = fs.readFileSync(store.file + '.bak');
     fs.writeFileSync(store.file, '{broken');
     const broken = store.read(); assert(broken.error);
@@ -135,10 +151,10 @@ function remove(p) {
     assert.strictEqual(env.ELECTRON_RUN_AS_NODE, undefined); assert.strictEqual(env.PATH, '/bin');assert.strictEqual(env.LAUNCHER_SAVE_CONTEXT,undefined);
     const descriptor = adapters.describe(game, runtime, { root: tmp, dataRoot: path.join(tmp, 'data') });
     assert.strictEqual(descriptor.argv[descriptor.argv.length - 1], root);
-    assert.deepStrictEqual(descriptor.argv,['--user-data-dir='+descriptor.userData,root]);
+    assert.deepStrictEqual(descriptor.argv,['--user-data-dir='+descriptor.userData,'--require',path.resolve(__dirname,'../adapters/electron-lifecycle.js'),root],'Managed games must leave the background process after their final window closes');
     assert.strictEqual(descriptor.cwd, root);
     assert.deepStrictEqual(adapters.describe(Object.assign({},game,{savePolicy:null}),runtime,{root:tmp,dataRoot:path.join(tmp,'data')}),descriptor,'Explicit disable must retain ordinary argv/cwd/userData');
-    const fakeProbe = (exe, args, options, cb) => cb(null, 'LAUNCHER_RUNTIME:' + JSON.stringify({ version: '26.6.10', arch: 'x64', platform: 'darwin' }), '');
+    const fakeProbe = (exe, args, options, cb) => {assert.strictEqual(options.timeout,60000);cb(null, 'LAUNCHER_RUNTIME:' + JSON.stringify({ version: '26.6.10', arch: 'x64', platform: 'darwin' }), '');};
     const probed = await launch.inspectRuntime(process.execPath, fakeProbe);
     assert.strictEqual(probed.version, '26.6.10');
     await assert.rejects(launch.inspectRuntime(process.execPath, (a,b,c,cb) => cb(Object.assign(new Error('timeout'), { killed:true }))), /超时/);

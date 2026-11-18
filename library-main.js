@@ -26,6 +26,7 @@ function start(context,options) {
   const seed=adapters.defaults;
   const store=config.createStore(context.dataRoot,seed,adapters.metadata);
   const savePolicies=require('./core/save-policy').create(context,{inspect:adapters.inspectSaveProfile,validate:adapters.validateSaveBytes});
+  const runtimeManager=require('./core/runtime-manager').create(context);
   let operationBusy=false;
   const runner=new Runner(); let window;
   const expected=pathToFileURL(path.join(context.root,'ui/index.html')).href;
@@ -56,7 +57,8 @@ function start(context,options) {
         try {
           const state=store.read();if(state.error)throw config.failure(state.error.code,state.error.message);
           const existing=state.library.games.find(g=>g&&g.id===input.id);
-          const resolved=resolveRuntime(Object.assign({},input,{runtimeId:existing&&existing.runtimeId}),state.library);
+          const draft=Object.assign({},input,{runtimeId:existing&&existing.runtimeId});
+          let resolved;try{resolved=resolveRuntime(draft,state.library);}catch(error){if(error.code!=='RUNTIME_MISSING')throw error;const requirement=error.requirement;return {status:'missing',requiredVersion:requirement.version,arch:requirement.arch,message:'需要 Electron '+requirement.version+' / '+requirement.arch+'，可从官网安装，或添加电脑上已有的版本。'};}
           return {status:'matched',requiredVersion:resolved.requirement.version,arch:resolved.requirement.arch,evidence:resolved.requirement.evidence,matchedRuntimeId:resolved.runtime.id};
         }catch(error){return {status:({GAME_RUNTIME_UNKNOWN:'unknown',GAME_RUNTIME_CONFLICT:'conflict',RUNTIME_MISSING:'missing'})[error.code]||'incompatible',code:error.code,message:error.message};}
       },
@@ -99,12 +101,22 @@ function start(context,options) {
         window.webContents.send('launcher:save-progress',{gameId:game.id,phase:'saving'});
         store.saveGame(Object.assign({},input,{game}));return Object.assign(snapshot(),{savedGameId:game.id});
       },
+      installGameRuntime:async input=>{
+        if(!config.object(input)||!config.object(input.game))throw config.failure('INPUT_INVALID','缺少游戏设置');
+        const state=store.read();if(state.error)throw config.failure(state.error.code,state.error.message);
+        if(input.token!==state.token||input.revision!==state.library.revision)throw config.failure('CONFIG_CONFLICT','配置已变化，请重新载入');
+        const requirement=adapters.runtimeRequirement(input.game);
+        const runtime=await runtimeManager.install(requirement,(phase,details)=>{if(!window.isDestroyed())window.webContents.send('launcher:runtime-progress',Object.assign({phase,version:requirement.version,arch:requirement.arch},details));});
+        const saved=store.saveRuntime({revision:input.revision,token:input.token,runtime});
+        return Object.assign(snapshot(),{savedRuntimeId:saved.savedRuntimeId});
+      },
+      cancelRuntimeInstall:()=>runtimeManager.cancel(),
       saveRuntime:async input=>{
         if(!config.object(input)||!config.object(input.runtime))throw config.failure('INPUT_INVALID','缺少运行环境记录');
         if(input.runtime.id!==undefined)throw config.failure('RUNTIME_IMMUTABLE','运行环境身份不可修改，新登记由程序生成新身份');
         const runtime=Object.assign({},await inspectRuntime(input.runtime.executablePath),{id:input.runtime.id,source:input.runtime.source||input.runtime.executablePath});
         if(runner.busy)throw config.failure('ALREADY_RUNNING','游戏运行中不能保存');
-        const state=store.saveRuntime(Object.assign({},input,{runtime}));return Object.assign(snapshot(),{savedRuntimeId:state.library.runtimes[state.library.runtimes.length-1].id});
+        const state=store.saveRuntime(Object.assign({},input,{runtime}));return Object.assign(snapshot(),{savedRuntimeId:state.savedRuntimeId});
       },
       launchGame:async id=>{
         if(typeof id!=='string')throw config.failure('GAME_INVALID','请选择游戏');
@@ -120,7 +132,7 @@ function start(context,options) {
       try {
         if(event.sender!==window.webContents || event.sender.getURL()!==expected) throw config.failure('FORBIDDEN','只允许游戏库页面调用');
         if(!config.object(request)||typeof request.action!=='string'||!Object.prototype.hasOwnProperty.call(actions,request.action))throw config.failure('INPUT_INVALID','不支持的操作');
-        const locked=['saveGame','saveRuntime','restoreConfig','launchGame','inspectSavePolicy'].includes(request.action);
+        const locked=['saveGame','saveRuntime','installGameRuntime','restoreConfig','launchGame','inspectSavePolicy'].includes(request.action);
         if(runner.busy && locked)throw config.failure('ALREADY_RUNNING','游戏启动/运行中不能保存、恢复或重新检查配置');
         if(locked&&operationBusy)throw config.failure('OPERATION_BUSY','另一个配置或启动操作正在进行，请稍候');
         if(locked)operationBusy=true;
@@ -129,7 +141,7 @@ function start(context,options) {
       }catch(error){console.error('[library]',error.code||'FAILED',error.message);return {ok:false,code:error.code||'FAILED',message:error.message,fieldErrors:error.fieldErrors};}
     });
     window.loadFile(path.join(context.root,'ui/index.html'));
-    if(options.librarySmoke)require('./tests/library-smoke').runUI(window,{store,context,runner}).then(()=>app.exit(0),error=>{console.error(error);if(runner.child)runner.child.kill();app.exit(1);});
+    if(options.librarySmoke)require('./tests/library-smoke').runUI(window,{store,context,runner,runtimeManager}).then(()=>app.exit(0),error=>{console.error(error);if(runner.child)runner.child.kill();app.exit(1);});
   });
   app.on('window-all-closed',()=>app.quit());
 }

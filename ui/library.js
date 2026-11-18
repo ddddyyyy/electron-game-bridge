@@ -1,5 +1,6 @@
 const $=id=>document.getElementById(id);
 let state,selected=null,editingId=null,busy=false,saving=false,registering=false,returnFocus=null,runtimeFocus=null,resolutionSequence=0;
+let runtimeDownloading=false;
 let savePreview=null,saveDirty=false,saveBase=null,saveSequence=0;
 function message(text,error){$('message').textContent=text||'';$('message').classList.toggle('error',!!error);}
 function fail(error){message(error.message,true);$('fields-error').textContent=error.fieldErrors?Object.keys(error.fieldErrors).map(k=>k+'：'+error.fieldErrors[k]).join('\n'):error.message;}
@@ -37,7 +38,14 @@ function render(){
 function renderRuntimes(){
   $('runtime-list').textContent='';
   if(!state||!state.library)return;
-  state.library.runtimes.forEach(r=>{if(!r||!r.id)return;const box=document.createElement('div');box.className='runtime-record';const title=document.createElement('strong');title.textContent='Electron '+(r.version||'?')+' · '+(r.arch||'?');const loc=document.createElement('small');loc.textContent=r.executablePath||'路径无效';box.append(title,loc);$('runtime-list').append(box);});
+  const groups=new Map();
+  state.library.runtimes.forEach(r=>{if(!r||!r.id)return;const key=[r.version,r.arch,r.platform,r.fingerprint,r.executablePath].join('\0');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);});
+  groups.forEach(records=>{
+    const r=records[0],ids=records.map(record=>record.id),names=state.library.games.filter(g=>g&&ids.includes(g.runtimeId)).map(g=>g.name);
+    const box=document.createElement('div');box.className='runtime-record';const title=document.createElement('strong');title.textContent='Electron '+(r.version||'?')+' · '+(r.arch||'?');
+    const usage=document.createElement('small');usage.textContent=names.length?'用于：'+names.join('、'):'已安装，尚未被游戏使用';
+    const details=document.createElement('details'),summary=document.createElement('summary'),loc=document.createElement('small');summary.textContent='查看安装位置';loc.textContent=r.executablePath||'路径无效';details.append(summary,loc);box.append(title,usage,details);$('runtime-list').append(box);
+  });
 }
 function accept(next,preferred){
   state=next;
@@ -49,7 +57,7 @@ function setBusy(value){
   ['add','settings','nav-runtime'].forEach(id=>$(id).disabled=locked||bad||(id==='settings'&&!current()));
   $('launch').disabled=locked||bad||!selected;
   $('game-fields').disabled=locked;$('runtime-fields').disabled=locked;
-  ['save','inspect','open-runtime','inspect-saves'].forEach(id=>$(id).disabled=locked||bad);
+  ['save','inspect','open-runtime','inspect-saves','download-runtime'].forEach(id=>$(id).disabled=locked||bad);
   $('restore').disabled=locked;$('close-settings').disabled=saving||registering;$('cancel').disabled=saving||registering;$('close-runtime').disabled=registering;
 }
 function formGame(){
@@ -57,8 +65,9 @@ function formGame(){
 }
 async function resolve(){
   const seq=++resolutionSequence;if($('settings-panel').hidden)return;
-  $('runtime-result').textContent='正在识别…';
+  $('download-runtime').hidden=true;$('runtime-result').textContent='正在识别…';
   try{const result=await window.launcher.resolveGameRuntime(formGame());if(seq!==resolutionSequence)return;
+    $('download-runtime').hidden=result.status!=='missing'||!result.requiredVersion;
     $('runtime-result').textContent=result.status==='matched'?'Electron '+result.requiredVersion+' / '+result.arch+' · 已自动匹配\n'+result.evidence.join('\n'):result.message;
   }catch(error){if(seq===resolutionSequence)$('runtime-result').textContent=error.message;}
 }
@@ -101,6 +110,38 @@ $('runtime-form').onsubmit=async event=>{
     invalidateSavePreview();state=next;render();$('runtime-status').textContent='Electron '+runtime.version+' / '+runtime.arch+' 已独立登记。';message('运行环境已登记，游戏设置仍需单独保存。');
   }catch(error){$('runtime-status').textContent=error.message;fail(error);}finally{registering=false;setBusy(busy);}
 };
+$('download-runtime').onclick=async()=>{
+  if(busy||saving||registering)return;registering=true;runtimeDownloading=true;setBusy(busy);
+  $('runtime-download').hidden=false;$('cancel-runtime-download').hidden=false;$('cancel-runtime-download').disabled=false;$('cancel-runtime-download').textContent='取消下载';
+  $('runtime-download-phase').textContent='正在连接 Electron 官方下载…';$('fields-error').textContent='';$('runtime-download-stats').textContent='';$('runtime-download-stats').hidden=false;$('runtime-download-progress').hidden=false;$('runtime-download-progress').removeAttribute('value');$('runtime-download').scrollIntoView({block:'nearest'});$('cancel-runtime-download').focus();
+  try {
+    const next=await window.launcher.installGameRuntime({revision:state.library.revision,token:state.token,game:formGame()});
+    invalidateSavePreview();state=next;render();await resolve();message('Electron 已安装，游戏设置仍需保存。');
+  }catch(error){
+    if(error.code==='RUNTIME_INSTALL_CANCELLED'){message('下载已取消，已有版本和游戏数据保持不变。');$('fields-error').textContent='';$('runtime-result').textContent='下载已取消，可以重新下载或添加已有的 Electron。';}
+    else{fail(error);$('runtime-result').textContent=error.message;}
+  }finally{runtimeDownloading=false;registering=false;$('runtime-download').hidden=true;setBusy(busy);(!$('download-runtime').hidden?$('download-runtime'):$('resolve-runtime')).focus();}
+};
+$('cancel-runtime-download').onclick=async()=>{
+  if(!runtimeDownloading)return;$('cancel-runtime-download').disabled=true;$('cancel-runtime-download').textContent='正在取消…';$('runtime-download-phase').textContent='正在取消并清理临时文件…';
+  try{await window.launcher.cancelRuntimeInstall();}catch(error){$('runtime-download-phase').textContent=error.message;$('cancel-runtime-download').disabled=false;$('cancel-runtime-download').textContent='重试取消';}
+};
+function transferSize(bytes){
+  if(bytes>=1000000000)return (bytes/1000000000).toFixed(1)+' GB';
+  if(bytes>=1000000)return (bytes/1000000).toFixed(1)+' MB';
+  if(bytes>=1000)return (bytes/1000).toFixed(1)+' KB';
+  return Math.round(bytes)+' B';
+}
+window.launcher.onRuntimeProgress(value=>{
+  if(!runtimeDownloading||$('cancel-runtime-download').disabled)return;
+  $('runtime-download-phase').textContent=value.phase==='downloading'?(value.fileName==='SHASUMS256.txt'?'正在下载官方校验信息…':'正在下载 Electron '+value.version+' / '+value.arch+'…'):({checking:'正在检查已安装的 Electron…',verifying:'正在核对官方 SHA-256 校验值…',extracting:'正在安装 Electron…',probing:'正在验证实际版本与架构…'})[value.phase]||'';
+  const downloading=value.phase==='downloading';$('cancel-runtime-download').hidden=false;$('cancel-runtime-download').textContent=downloading?'取消下载':'取消安装';$('runtime-download-progress').hidden=!downloading;$('runtime-download-stats').hidden=!downloading;
+  if(!downloading)return;
+  const received=Number.isFinite(value.receivedBytes)?Math.max(0,value.receivedBytes):0,total=Number.isFinite(value.totalBytes)&&value.totalBytes>0?value.totalBytes:null,speed=Number.isFinite(value.bytesPerSecond)?Math.max(0,value.bytesPerSecond):0;
+  const percent=total?Math.min(100,Math.floor(received/total*100)):null;
+  if(percent===null)$('runtime-download-progress').removeAttribute('value');else $('runtime-download-progress').value=percent;
+  $('runtime-download-stats').textContent=(total?percent+'% · '+transferSize(received)+' / '+transferSize(total):'已下载 '+transferSize(received)+'（总大小未知）')+' · '+transferSize(speed)+'/s';
+});
 $('game-form').onsubmit=async event=>{
   event.preventDefault();if(busy||saving||registering)return;saving=true;setBusy(busy);
   try{const next=await window.launcher.saveGame({revision:state.library.revision,token:state.token,game:formGame(),saveChoice:saveChoice()});saving=false;closeSettings();accept(next,next.savedGameId);message('设置已保存。');}
@@ -159,7 +200,7 @@ document.addEventListener('keydown',event=>{
   const panel=!$('runtime-panel').hidden?$('runtime-panel'):!$('settings-panel').hidden?$('settings-panel'):null;if(!panel)return;
   if(event.key==='Escape'){event.preventDefault();if(panel===$('runtime-panel'))closeRuntime();else closeSettings();}
   if(event.key==='Tab'){
-    const items=Array.from(panel.querySelectorAll('button,input,select,textarea')).filter(el=>!el.disabled&&el.offsetParent!==null);const first=items[0],last=items[items.length-1];
+    const items=Array.from(panel.querySelectorAll('button,input,select,textarea')).filter(el=>!el.matches(':disabled')&&el.offsetParent!==null);const first=items[0],last=items[items.length-1];
     if(items.length&&((event.shiftKey&&document.activeElement===first)||(!event.shiftKey&&document.activeElement===last))){event.preventDefault();(event.shiftKey?last:first).focus();}
   }
 });

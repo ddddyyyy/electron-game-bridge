@@ -16,7 +16,7 @@ function inspectWindowsElectron(file) {
     for(let i=0;i<count;i++) {
       const s=table.slice(i*40,i*40+40);if(s.toString('ascii',0,8).replace(/\0/g,'')!=='.rdata')continue;
       const length=s.readUInt32LE(16),offset=s.readUInt32LE(20);
-      if(length>32*1024*1024)throw Error('PE metadata exceeds 32 MiB');
+      if(length>64*1024*1024)throw Error('PE metadata exceeds 64 MiB');
       const data=read(offset,length).toString('latin1');
       const pattern=/\bElectron\/(\d+\.\d+\.\d+(?:-[\w.-]+)?)(?![\d.])/g;let match;
       while((match=pattern.exec(data)))versions.add(match[1]);
@@ -27,7 +27,7 @@ function inspectWindowsElectron(file) {
   finally{fs.closeSync(fd);}
 }
 function packagedRuntimeEvidence(installPath) {
-  if(!fs.existsSync(path.join(installPath,'resources/app.asar')))return [];
+  if(!fs.existsSync(path.join(installPath,'resources/app.asar'))&&!fs.existsSync(path.join(installPath,'resources/app/package.json')))return [];
   const names=fs.readdirSync(installPath).filter(n=>n.toLowerCase().endsWith('.exe'));
   if(names.length>8)throw failure('GAME_RUNTIME_UNKNOWN','随附可执行文件过多，无法唯一识别运行环境');
   const result=[];

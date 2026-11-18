@@ -11,7 +11,7 @@ module.exports.runUI = async function (window, services) {
   async function wait(expression) {for(let i=0;i<300;i++){if(await run(expression))return;await sleep(100);}throw Error('UI timeout: '+expression);}
   async function api(name,value) {const result=await run('window.launcher.'+name+'('+JSON.stringify(value)+').then(value=>({ok:true,value}),error=>({ok:false,message:error.message,code:error.code}))');if(!result.ok)throw Object.assign(Error(result.message),{code:result.code});return result.value;}
   function editable(g){const value=Object.assign({},g);delete value.runtimeId;delete value.savePolicy;return value;}
-  async function screenshot(name){await sleep(200);fs.writeFileSync(path.join(services.context.test,name+'.png'),(await contents.capturePage()).toPNG());}
+  async function screenshot(name){window.show();window.focus();await sleep(200);const capture=await Promise.race([contents.capturePage(),new Promise((_resolve,reject)=>setTimeout(()=>reject(Error('Screenshot capture timed out')),10000))]);fs.writeFileSync(path.join(services.context.test,name+'.png'),capture.toPNG());}
   try {
     await new Promise(resolve=>contents.once('did-finish-load',resolve));
     await wait("document.getElementById('games').textContent.includes('还没有游戏')");
@@ -38,7 +38,7 @@ module.exports.runUI = async function (window, services) {
     const pkgValue=JSON.parse(fs.readFileSync(path.join(fixture,'package.json')));pkgValue.devDependencies.electron=process.versions.electron;pkgValue.cpu=[process.arch];fs.writeFileSync(path.join(fixture,'package.json'),JSON.stringify(pkgValue));
     await run("document.getElementById('add').click()");
     await run("document.getElementById('name').value='<b>应用夹具</b>';document.getElementById('install').value="+JSON.stringify(fixture)+";document.getElementById('args').value='--fixture-exit';document.getElementById('resolve-runtime').click()");
-    await wait("document.getElementById('runtime-result').textContent.includes('登记')");
+    await wait("!document.getElementById('download-runtime').hidden");
     const beforeCancel=fs.readFileSync(services.store.file).toString();
     await run("document.getElementById('cancel').click()");
     assert.strictEqual(fs.readFileSync(services.store.file).toString(),beforeCancel);
@@ -51,11 +51,47 @@ module.exports.runUI = async function (window, services) {
     // Game cancellation never rolls back an explicitly saved runtime registration.
     await run("document.getElementById('cancel').click()");
     state=await api('readLibrary');assert.strictEqual(state.library.runtimes.length,1);
+    const runtimeRevision=state.library.revision;
+    state=await api('saveRuntime',{revision:state.library.revision,token:state.token,runtime:{executablePath:process.execPath}});
+    assert.strictEqual(state.library.runtimes.length,1);assert.strictEqual(state.library.revision,runtimeRevision,'Repeated detection does not create a new registration');assert.strictEqual(state.savedRuntimeId,state.library.runtimes[0].id);
+    await run('state.library.runtimes.push(Object.assign({},state.library.runtimes[0],{id:"runtime-legacy-duplicate"}));renderRuntimes()');
+    assert.strictEqual(await run("document.querySelectorAll('#runtime-list .runtime-record').length"),1);
+    await run('state.library.runtimes.pop();renderRuntimes()');
+    const originalInstall=services.runtimeManager.install;
+    services.runtimeManager.install=async(requirement,progress)=>{assert.strictEqual(requirement.version,process.versions.electron);progress('downloading');return require('../core/launch').inspectRuntime(process.execPath);};
+    try{state=await api('installGameRuntime',{revision:state.library.revision,token:state.token,game:{adapterId:'electron-app',installPath:fixture,entry:'.'}});assert.strictEqual(state.library.runtimes.length,1);}finally{services.runtimeManager.install=originalInstall;}
+
+    const cancelFixture=path.join(services.context.test,'download-cancel');fs.mkdirSync(cancelFixture);fs.writeFileSync(path.join(cancelFixture,'package.json'),JSON.stringify({main:'main.js',devDependencies:{electron:'99.1.0'},cpu:[process.arch]}));
+    const beforeDownload=fs.readFileSync(services.store.file),originalCancel=services.runtimeManager.cancel;let cancelPending,transferProgress;
+    services.runtimeManager.install=async(requirement,progress)=>{transferProgress=progress;progress('downloading',{fileName:'electron.zip',receivedBytes:5000000,totalBytes:10000000,bytesPerSecond:2500000});return new Promise((_resolve,reject)=>{cancelPending=reject;});};
+    services.runtimeManager.cancel=()=>{cancelPending(Object.assign(Error('cancelled'),{code:'RUNTIME_INSTALL_CANCELLED'}));return true;};
+    try {
+      await run("document.getElementById('add').click();document.getElementById('name').value='下载取消夹具';document.getElementById('install').value="+JSON.stringify(cancelFixture)+";resolve()");
+      await wait("!document.getElementById('download-runtime').hidden");await run("document.getElementById('download-runtime').click()");
+      await wait("document.getElementById('runtime-download-progress').value===50 && document.getElementById('runtime-download-stats').textContent.includes('2.5 MB/s')");
+      assert((await run("document.getElementById('runtime-download-stats').textContent")).includes('5.0 MB / 10.0 MB'));
+      assert.strictEqual(await run("document.getElementById('cancel-runtime-download').disabled"),false);
+      assert.strictEqual(await run('document.activeElement.id'),'cancel-runtime-download');
+      assert.strictEqual(await run("(()=>{const event=new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true});document.activeElement.dispatchEvent(event);return event.defaultPrevented;})()"),true,'Keep keyboard focus on the available cancel action');
+      assert.strictEqual(await run("document.getElementById('cancel-runtime-download').closest('fieldset')"),null,'Cancel is outside the disabled form fields');
+      await screenshot('runtime-download');
+      transferProgress('downloading',{receivedBytes:6000000,totalBytes:null,bytesPerSecond:0});
+      await wait("document.getElementById('runtime-download-stats').textContent.includes('总大小未知') && document.getElementById('runtime-download-stats').textContent.includes('0 B/s')");
+      assert.strictEqual(await run("document.getElementById('runtime-download-progress').hasAttribute('value')"),false);
+      transferProgress('probing');await wait("!document.getElementById('cancel-runtime-download').hidden && document.getElementById('cancel-runtime-download').textContent==='取消安装'");
+      await run("document.getElementById('cancel-runtime-download').click()");
+      await wait("document.getElementById('runtime-result').textContent.includes('下载已取消') && !document.getElementById('download-runtime').disabled");
+      assert.deepStrictEqual(fs.readFileSync(services.store.file),beforeDownload);assert.strictEqual(await run('document.activeElement.id'),'download-runtime');assert.strictEqual(await run("document.getElementById('runtime-download').hidden"),true);await run("document.getElementById('cancel').click()");
+    }finally{if(cancelPending)cancelPending(Object.assign(Error('test done'),{code:'RUNTIME_INSTALL_CANCELLED'}));services.runtimeManager.install=originalInstall;services.runtimeManager.cancel=originalCancel;}
+    assert.strictEqual(await api('cancelRuntimeInstall'),false);
+    console.log('PASS: measured download UI, unknown totals, live speed and cancellation without configuration changes');
+
     await assert.rejects(api('saveRuntime',{revision:state.library.revision,token:state.token,runtime:state.library.runtimes[0]}),e=>e.code==='RUNTIME_IMMUTABLE');
     const companion=path.join(services.context.test,'companion');fs.mkdirSync(companion);
     ['package.json','main.js','index.html'].forEach(n=>fs.copyFileSync(path.join(fixture,n),path.join(companion,n)));
     const seed=await api('saveGame',{revision:state.library.revision,token:state.token,game:{name:'示例应用 B',iconPath:null,installPath:companion,adapterId:'electron-app',entry:'.',workingDirectory:'.',args:['--fixture-exit'],window:null,capabilities:{}}});
     original=JSON.stringify(seed.library.games[0]);await run('reload()');await wait("document.querySelectorAll('.game').length===1");
+    assert((await run("document.getElementById('runtime-list').textContent")).includes('示例应用 B'));
 
     await run("document.getElementById('add').click();document.getElementById('name').value='<b>应用夹具</b>';document.getElementById('install').value="+JSON.stringify(fixture)+";document.getElementById('args').value='--fixture-exit';document.getElementById('save').click()");
     await wait("document.querySelectorAll('.game').length===2 && document.getElementById('settings-panel').hidden");
@@ -82,7 +118,7 @@ module.exports.runUI = async function (window, services) {
     const concurrentRequest={revision:state.library.revision,token:state.token,game:editable(game)};
     const concurrent=await run('Promise.all([window.launcher.saveGame('+JSON.stringify(concurrentRequest)+').then(()=>({ok:true}),error=>({code:error.code})),window.launcher.restoreConfig('+JSON.stringify({token:state.token})+').then(()=>({ok:true}),error=>({code:error.code}))])');
     assert.strictEqual(concurrent[0].ok,true);assert.strictEqual(concurrent[1].code,'OPERATION_BUSY');state=await api('readLibrary');
-    const savedBytes=fs.readFileSync(services.store.file).toString();
+    let savedBytes=fs.readFileSync(services.store.file).toString();
     const pkg=path.join(fixture,'package.json'),pkgBytes=fs.readFileSync(pkg);
     fs.writeFileSync(pkg,JSON.stringify({main:'main.js',devDependencies:{electron:'^7.0.0'}}));
     const unresolved=await api('resolveGameRuntime',editable(game));assert.strictEqual(unresolved.status,'unknown');
@@ -100,6 +136,17 @@ module.exports.runUI = async function (window, services) {
     for(let i=0;i<200&&!fs.existsSync(marker);i++)await sleep(100);
     assert(fs.existsSync(marker),'应用自身初始化未执行');assert.strictEqual(JSON.parse(fs.readFileSync(marker)).version,process.versions.electron);
     for(let i=0;i<200&&services.runner.busy;i++)await sleep(100);assert.strictEqual(services.runner.busy,false);
+    await wait("!document.getElementById('settings').disabled");
+    for(const button of ['add','nav-runtime','launch','settings'])assert.strictEqual(await run('document.getElementById('+JSON.stringify(button)+').disabled'),false,'Unlock '+button+' after actual exit');
+    state=await api('readLibrary');const closeGame=Object.assign(editable(state.library.games.find(g=>g.id===game.id)),{args:['--fixture-close','--fixture-save-before-quit']});
+    state=await api('saveGame',{revision:state.library.revision,token:state.token,game:closeGame});
+    await api('launchGame',game.id);for(let n=0;n<300&&services.runner.busy;n++)await sleep(100);assert(!services.runner.busy,'Closing the last window must end its background process');
+    await wait("!document.getElementById('settings').disabled");
+    for(const button of ['add','nav-runtime','launch','settings'])assert.strictEqual(await run('document.getElementById('+JSON.stringify(button)+').disabled'),false,'Restore '+button+' after closing the game window');
+    assert(fs.existsSync(path.join(services.context.dataRoot,'games',game.id,'userdata/save-completed')),'Keep the original before-quit save callback');
+    state=await api('readLibrary');state=await api('saveGame',{revision:state.library.revision,token:state.token,game:editable(game)});savedBytes=fs.readFileSync(services.store.file).toString();
+    // Direct IPC test saves must synchronize the UI just like the settings form.
+    await run('accept('+JSON.stringify(state)+','+JSON.stringify(game.id)+')');
     const binding=path.join(services.context.dataRoot,'games',game.id,'runtime.json'),bindingBytes=fs.readFileSync(binding);
     const badBinding=JSON.parse(bindingBytes);badBinding.version='8.0.0';fs.writeFileSync(binding,JSON.stringify(badBinding));
     await assert.rejects(api('saveGame',{revision:state.library.revision,token:state.token,game:Object.assign(editable(game),{name:'不应保存'})}),e=>e.code==='RUNTIME_DATA_INCOMPATIBLE');

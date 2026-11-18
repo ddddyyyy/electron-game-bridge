@@ -35,10 +35,12 @@ function cleanEnv(source) {
   return env;
 }
 function removeTree(p) {
-  if (!fs.existsSync(p)) return;
-  if (fs.lstatSync(p).isDirectory() && !fs.lstatSync(p).isSymbolicLink()) {
-    fs.readdirSync(p).forEach(n => removeTree(path.join(p,n))); fs.rmdirSync(p);
-  } else fs.unlinkSync(p);
+  // Cleanup must see physical ASAR files, not Electron's virtual directories.
+  const physicalFs=process.versions.electron?require('original-fs'):fs;
+  let stat;try{stat=physicalFs.lstatSync(p);}catch(error){if(error.code==='ENOENT')return;throw error;}
+  if (stat.isDirectory() && !stat.isSymbolicLink()) {
+    physicalFs.readdirSync(p).forEach(n => removeTree(path.join(p,n))); physicalFs.rmdirSync(p);
+  } else physicalFs.unlinkSync(p);
 }
 async function inspectRuntime(input, execute) {
   const os = require('os');
@@ -51,10 +53,11 @@ async function inspectRuntime(input, execute) {
   const fingerprint = config.sha(fs.readFileSync(executablePath));
   const temp = fs.mkdtempSync(path.join(os.tmpdir(),'launcher-probe-'));
   try {
+    // A first macOS launch of a recent Electron build can exceed 20 seconds.
     const stdout = await new Promise((resolve,reject) => {
       (execute || require('child_process').execFile)(executablePath,
         ['--user-data-dir='+temp, path.join(__dirname,'runtime-probe'), '--probe-data='+temp],
-        { env:cleanEnv(process.env), timeout:10000, maxBuffer:64*1024, killSignal:'SIGKILL' },
+        { env:cleanEnv(process.env), timeout:60000, maxBuffer:64*1024, killSignal:'SIGKILL' },
         (error,out) => error ? reject(failure(error.killed ? 'RUNTIME_PROBE_TIMEOUT' : 'RUNTIME_UNAVAILABLE',error.killed ? '运行环境探测超时' : '运行环境探测失败：'+error.message)) : resolve(out));
     });
     const line = stdout.split(/\r?\n/).find(l=>l.startsWith('LAUNCHER_RUNTIME:'));
@@ -176,7 +179,7 @@ function resolveRuntime(game,library) {
   const requirement=require('../adapters').runtimeRequirement(game);
   const candidates=library.runtimes.filter(r=>config.object(r)&&!Object.keys(config.runtimeErrors(r)).length&&r.version===requirement.version&&r.arch===requirement.arch&&r.platform===process.platform);
   candidates.sort((a,b)=>a.id===game.runtimeId?-1:b.id===game.runtimeId?1:a.id<b.id?-1:a.id>b.id?1:0);
-  if(!candidates.length)throw failure('RUNTIME_MISSING','需要 Electron '+requirement.version+' / '+requirement.arch+'，请在运行环境入口独立登记本地文件后重试自动匹配');
+  if(!candidates.length)throw Object.assign(failure('RUNTIME_MISSING','需要 Electron '+requirement.version+' / '+requirement.arch+'，请从官网安装匹配版本，或添加已有的 Electron'),{requirement});
   return {requirement,runtime:candidates[0]};
 }
 function runtimeIdentity(runtime) {return {version:runtime.version,arch:runtime.arch,platform:runtime.platform,fingerprint:runtime.fingerprint};}

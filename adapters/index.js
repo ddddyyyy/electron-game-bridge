@@ -15,7 +15,7 @@ function describe(game,runtime,context) {
   const cwd = path.resolve(game.installPath,game.workingDirectory);
   const userData=path.join(context.dataRoot,'games',game.id,'userdata');
   if(game.adapterId!=='electron-app')throw new Error('不支持的启动方式');
-  const argv=['--user-data-dir='+userData,entry].concat(game.args);
+  const argv=['--user-data-dir='+userData,'--require',path.join(__dirname,'electron-lifecycle.js'),entry].concat(game.args);
   if(game.savePolicy)argv.splice(1,0,'--require',path.join(__dirname,'tyrano-save/main-hook.js'));
   if(context.test&&process.platform==='darwin')argv.push('-ApplePersistenceIgnoreState','YES');
   return {executablePath:runtime.executablePath,argv,cwd,userData,entry,env:Object.assign({},process.env)};
@@ -42,7 +42,8 @@ function runtimeRequirement(game) {
       arch=pkg.cpu.includes(process.arch)?process.arch:pkg.cpu[0];arches.push(arch);
     }
   }
-  for(const bundled of require('./windows-electron').packagedRuntimeEvidence(game.installPath)){versions.push(bundled.version);arches.push(bundled.arch);evidence.push(bundled.evidence);if(arch&&arch!==bundled.arch)throw failure('GAME_RUNTIME_CONFLICT','游戏架构声明与随附程序冲突');arch=bundled.arch;}
+  const runtimeRoot=path.basename(path.dirname(entry))==='resources'?path.dirname(path.dirname(entry)):game.installPath;
+  for(const bundled of require('./windows-electron').packagedRuntimeEvidence(runtimeRoot)){versions.push(bundled.version);arches.push(bundled.arch);evidence.push(bundled.evidence);if(arch&&arch!==bundled.arch)throw failure('GAME_RUNTIME_CONFLICT','游戏架构声明与随附程序冲突');arch=bundled.arch;}
   if(new Set(arches).size>1)throw failure('GAME_RUNTIME_CONFLICT','游戏架构声明冲突，未启动或修改配置');
   if(new Set(versions).size>1)throw failure('GAME_RUNTIME_CONFLICT','游戏的精确 Electron 版本证据冲突，未启动或修改配置');
   if(!versions.length)throw failure('GAME_RUNTIME_UNKNOWN','无法确定这款游戏所需的精确 Electron 版本：未发现可核对的版本信息，仅版本范围或游戏自身版本号不足以判断。请保留原有启动方式，等待补充游戏适配');
@@ -50,10 +51,19 @@ function runtimeRequirement(game) {
 }
 module.exports.runtimeRequirement=runtimeRequirement;
 function applicationEntry(game) {
-  const declared=path.resolve(game.installPath,game.entry);
-  const packaged=path.join(game.installPath,'resources/app.asar');
-  const entry=game.adapterId==='electron-app'&&game.entry==='.'&&fs.existsSync(packaged)?packaged:declared;
-  if(!require('../core/config').inside(game.installPath,entry))throw require('../core/config').failure('GAME_INVALID','应用入口不能指向游戏目录外');
+  const {inside,failure}=require('../core/config'),declared=path.resolve(game.installPath,game.entry);
+  function packaged(directory) {
+    for(const name of ['app.asar','app']){const file=path.join(directory,'resources',name);if(fs.existsSync(file)&&inside(game.installPath,file))return file;}
+    return null;
+  }
+  let entry=packaged(declared)||declared;
+  if(entry===declared&&game.entry==='.'&&!declared.endsWith('.app')&&!fs.existsSync(path.join(declared,'package.json'))&&fs.existsSync(declared)) {
+    const names=fs.readdirSync(declared);if(names.length>128)throw failure('GAME_RUNTIME_UNKNOWN','安装目录项目过多，请选择实际 Electron 应用目录');
+    const candidates=names.filter(name=>{const file=path.join(declared,name);return inside(game.installPath,file)&&fs.statSync(file).isDirectory();}).map(name=>packaged(path.join(declared,name))).filter(Boolean);
+    if(candidates.length>1)throw failure('GAME_RUNTIME_UNKNOWN','找到多个 Electron 应用，请选择实际游戏子目录');
+    if(candidates.length===1)entry=candidates[0];
+  }
+  if(!inside(game.installPath,entry))throw failure('GAME_INVALID','应用入口不能指向游戏目录外');
   return entry;
 }
 module.exports.applicationEntry=applicationEntry;

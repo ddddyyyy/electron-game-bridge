@@ -176,10 +176,12 @@ function createStore(directory, defaults, metadata, io) {
     const old = library.runtimes.find(r => r && r.id === runtime.id);
     if (old) {
       if (['executablePath','version','arch','platform','fingerprint'].some(k => old[k] !== runtime[k])) throw failure('RUNTIME_IMMUTABLE', '运行环境身份不可原位修改，请作为新运行环境登记');
-      return state;
+      return Object.assign({},state,{savedRuntimeId:old.id});
     }
+    const duplicate=library.runtimes.find(r=>r&&!Object.keys(runtimeErrors(r)).length&&['version','arch','platform','fingerprint'].every(k=>r[k]===runtime[k])&&canonical(r.executablePath)===canonical(runtime.executablePath));
+    if(duplicate)return Object.assign({},state,{savedRuntimeId:duplicate.id});
     library.runtimes.push(runtime);
-    return commit(state, library);
+    return Object.assign(commit(state,library),{savedRuntimeId:runtime.id});
   }
   function restore(expectedToken) {
     const bytes = raw();
