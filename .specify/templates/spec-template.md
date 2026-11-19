@@ -1,8 +1,11 @@
 # Feature Specification: [FEATURE NAME]
 
-**Feature Branch**: `[###-feature-name]`  
-**Created**: [DATE]  
-**Status**: Draft  
+**Feature Branch**: `[###-feature-name]`
+
+**Created**: [DATE]
+
+**Status**: Draft
+
 **Input**: User description: "$ARGUMENTS"
 
 ## User Scenarios & Testing *(mandatory)*
@@ -11,7 +14,7 @@
   IMPORTANT: User stories should be PRIORITIZED as user journeys ordered by importance.
   Each user story/journey must be INDEPENDENTLY TESTABLE - meaning if you implement just ONE of them,
   you should still have a viable MVP (Minimum Viable Product) that delivers value.
-  
+
   Assign priorities (P1, P2, P3, etc.) to each story, where P1 is the most critical.
   Think of each story as a standalone slice of functionality that can be:
   - Developed independently
@@ -84,12 +87,8 @@
 
 ### Functional Requirements
 
-<!-- Separate existing behavior from new capabilities. Describe shared functionality and
-game-specific behavior, reuse when adding a game, and explicit non-goals without prescribing
-a plugin system or another implementation architecture. -->
-
 - **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
-- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]  
+- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]
 - **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
 - **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
 - **FR-005**: System MUST [behavior, e.g., "log all security events"]
@@ -103,15 +102,6 @@ a plugin system or another implementation architecture. -->
 
 - **[Entity 1]**: [What it represents, key attributes without implementation]
 - **[Entity 2]**: [What it represents, relationships to other entities]
-
-### Compatibility & Data Safety *(mandatory)*
-
-- Describe affected launch/game flows and runtime compatibility boundaries.
-- Describe save/export data impact, failure behavior and isolated test data.
-- Define acceptance scenarios for affected behavior, including failure and data preservation.
-- State non-applicable items with reasons and distinguish verified from unverified flows.
-- Identify existing behavior that must remain compatible, including disabled feature policies.
-- Define shared versus game-specific responsibilities and safe configuration migration/recovery.
 
 ## Success Criteria *(mandatory)*
 
@@ -139,7 +129,3 @@ a plugin system or another implementation architecture. -->
 - [Assumption about scope boundaries, e.g., "Mobile support is out of scope for v1"]
 - [Assumption about data/environment, e.g., "Existing authentication system will be reused"]
 - [Dependency on existing system/service, e.g., "Requires access to the existing user profile API"]
-
-### Non-Goals
-
-- [Explicit excluded capability or behavior; do not use exclusions to remove existing functionality]
