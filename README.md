@@ -1,101 +1,43 @@
 # Electron Game Bridge
 
-在 macOS 上运行仅提供 Windows EXE 发行包的 Electron 游戏。
+**简体中文** · [English](README.en.md)
 
-项目面向游戏没有提供 macOS 版本、但 Windows 发行目录中保留了 Electron 应用资源的场景。
-启动器识别游戏所需的 Electron 版本，匹配本地已登记或从官方安装的 macOS 运行环境，加载游戏资源及其原始 JavaScript 主入口。
-EXE 用于提供版本和架构证据，实际游戏进程由 macOS Electron 运行。
-
-支持本地多游戏管理、独立启动配置和运行数据隔离。默认打开空游戏库；仓库不包含游戏、存档、预设安装目录或 Electron 二进制。
-使用 JavaScript/CommonJS、HTML/CSS 和原生 DOM，共享代码兼容 Node 12；无需新增构建系统。
+在 macOS 上管理和启动随 Windows 版发布的 Electron 游戏。添加游戏的完整发行目录后，启动器识别它需要的 Electron 版本，并用匹配的 macOS Electron 加载游戏原始入口。游戏包保持原样。
 
 ## 适用范围
 
-- 支持完整 Windows 发行目录中包含 `resources/app.asar` 或 `resources/app` 的 Electron 游戏；也会识别唯一的下一层打包目录。添加游戏时选择整个安装目录，并保留随附 EXE 和其他资源。
-- 如果只有单个 EXE，且没有当前启动器能够读取的应用资源，本项目不会自动提取该 EXE 中的游戏。
-- 游戏原始主入口、preload 和初始化流程必须能在相应 macOS Electron 中工作。依赖 Windows 专属组件或不兼容原生模块的游戏可能无法运行。
-- 不修改、重打包游戏，也不承诺 Windows 存档能够跨平台直接续用。
+请保留 Windows 发行目录里的 EXE 和资源。导入的目录应包含 `resources/app.asar` 或 `resources/app`。只有单个 EXE 时，需要先取得可读取的应用资源。依赖 Windows 专属组件或不兼容原生模块的游戏可能无法启动。
 
-## 启动
+## 快速开始
 
-自行准备可运行的原始 Electron macOS 发行包，然后指定管理界面的运行环境：
+1. 首次打开游戏库前，下载并解压适合你的 Mac 的 `Electron.app`，无需运行 `npm install`。[Electron 官方发行页](https://github.com/electron/electron/releases)
+2. 在项目目录中运行以下命令，将示例路径换成本机路径。也可以把 `Electron.app` 放到项目的 `runtime/` 目录，再双击 `启动游戏库.command`。
 
-```sh
-LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command
-```
+   ```sh
+   LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command
+   ```
 
-也可将自备运行环境放到本机 `runtime/Electron.app` 后双击脚本。`runtime/` 不进入 Git。
-管理器使用哪个 Electron 启动，与各游戏实际使用的运行环境分别配置；无需 npm install。
+3. 点击 **添加游戏**，输入名称并选择完整发行目录。应用入口保留默认的 `.` 即可自动查找打包资源。识别到所需版本后，可以登记已有 Electron，或点击 **从官网安装匹配版本**。
+4. 点击 **保存设置**，回到游戏库选中该游戏，再点击 **启动游戏**。
 
-## 使用
+## 界面预览
 
-1. “运行环境”入口显示已安装的 Electron 版本、关联游戏与可展开的安装路径。同一份程序重复检测会复用原记录；也可选择电脑上的 Electron.app，点击“检测并保存”。
-2. 点击“添加游戏”，填写名称、安装目录和启动设置。图片可选；目录内有 resources/app.asar 时，默认入口 `.` 自动定位该归档。
-3. 程序识别所需精确版本并自动匹配；缺少时点击“从官网安装匹配版本”，无需手选版本或下载文件。安装成功后保存游戏设置，再启动游戏。
-4. 游戏停止后才可编辑。点击保存才提交，关闭/取消不保存；独立保存的运行环境登记单独生效。
+截图来自实际运行的启动器，游戏和存档均为合成测试数据。首次启动时游戏库为空。
 
-游戏使用自身的 Electron 主入口、窗口、preload 和初始化流程。启动器会在全部游戏窗口关闭后请求正常退出，等待游戏原有退出/保存回调完成、进程真正结束后恢复操作按钮；不会因为窗口消失就提前解锁。这个通用会话策略通过固定主进程模块接入，保留原始入口和窗口权限；只有明确启用下述存档兼容时才另外添加文件存储保护，不修改游戏包。
-版本证据来自 package.json 中精确的 dependencies/devDependencies.electron，或随附 Windows PE 程序的唯一 Electron 标记及架构。
-只有版本范围、游戏自身版本号、缺失或冲突的证据不会被猜成可用版本，也不会触发猜测下载。不承诺兼容任意游戏或原生模块。
+**游戏库。** 在多款本地游戏间切换，查看匹配的 Electron、安装目录和存档兼容状态，打开游戏设置或启动游戏。
 
-游戏运行环境按精确版本及架构安装到 `.launcher/runtimes/`，多款游戏共享同一安装，存档与设置仍按游戏隔离。从 [Electron 官方 GitHub Releases](https://www.electronjs.org/docs/latest/tutorial/installation) 下载对应 macOS 发行包，以官方 `SHASUMS256.txt` 核对 SHA-256，解包后探测实际版本再登记（首次检查可能需要数十秒，可取消）；已有缓存复用，不覆盖其他版本。下载时显示进度、已下载大小和速度；总大小未知时明确说明。点击“取消下载”会停止传输并清理本次临时文件，可以重新下载。安装独立生效，取消游戏设置不卸载版本；失败不重置已有游戏数据。管理界面的首次启动仍需上述自备 Electron。详见 [运行环境管理规格](specs/003-runtime-management/spec.md)。
+![游戏库显示两款示例游戏，以及所选游戏的运行环境、启动和设置按钮](docs/images/game-library.png)
 
-## 数据与恢复
+**运行环境。** 查看已登记的 Electron 和使用它的游戏，或检测并登记现有的 `Electron.app`。官网下载支持查看进度和取消，下载后经 SHA-256 校验和运行探测再登记。同版本、同架构的运行环境可由多款游戏共用。
 
-- 游戏库配置：`.launcher/library.json`；最后有效备份：同目录 `.bak`。
-- 管理界面状态：`.launcher/ui-data`；每游戏默认 userData：`.launcher/games/<id>/userdata`。
-- 实际运行环境绑定：`.launcher/games/<id>/runtime.json`。保存和启动均检查兼容性；未知旧数据或不兼容身份不会被重置、迁移或换目录。
-- 保存使用冲突检测和原子替换；显式恢复先保留故障原件，再恢复有效备份。
-- 日志：`logs/launcher.log` 及 `logs/games/<id>.log`。配置、日志、运行环境、图片和存档属于本地资料，不应提交。
+![Electron 版本管理窗口显示已登记的版本和关联游戏，并提供本地登记表单](docs/images/electron-runtimes.png)
 
-游戏可能自行覆盖数据目录，因此 userData 参数不构成文件系统沙箱。接入实际游戏时应在隔离副本上确认其数据位置，尤其是跨平台存档语义。
+**存档兼容。** 对能够识别的 Tyrano 500/520 文件存档实现，可检查游戏目录和 `resources` 中的存档，明确选择下次启动使用的位置。启动器在启用或更换位置前备份选定的存档。两处进度各自保留。
 
-## 存档兼容
+![游戏设置显示 Tyrano 存档的两个候选目录、当前路径和保存后生效的路径](docs/images/save-location.png)
 
-部分 Tyrano 游戏在 macOS 上会改为读取 `resources` 中的文件存档。可以在游戏停止后打开设置，点击“检查存档位置”，勾选“使用指定的存档位置”，并明确选择游戏目录或 `resources`。设置中分别显示当前已保存的位置和保存后生效的位置；选中后立即展示完整路径，点击保存才提交。界面展示文件名和时间，不判断哪份剧情进度更新，也不合并两处文件。有旧存档时不会默认替你选择；两处都空时，经确认使用游戏目录。
+## 本地数据与文档
 
-已从另一位置启动过时，启动器会将当前游戏的浏览器来源标识与已确认备份同步，避免原引擎误判“存档被移动”；不清空 Electron 数据、不改写存档内标识，也不跳过原校验。来源再次变化无法核对时，停止后重新检查并确认位置，不要按弹窗建议删除存档。
+游戏设置和启动器分配的默认游戏数据目录保存在 `.launcher/`。配置损坏时，可从 **配置恢复** 恢复最近一次有效的游戏库配置。启动诊断见 `logs/launcher.log` 和 `logs/games/`。
 
-保存设置前会完整备份选定集合；备份或配置提交失败不会启用新设置。保存成功后，详情显示实际存档位置。首次启用才将配置从 v1 升到 v2，并另存 `library.json.v1-original`；仅打开旧配置不会升级。普通编辑会保留策略。
-
-当前支持经过函数签名和布局核对的 Tyrano 500/520 文件存档实现。自有样本已在 macOS Electron 7.1.2 / 26.6.10 x64 验证；真实样本仍只使用各自要求的精确版本。版本号相同但存储方法不同、自定义插件存储、未知页面、sandbox、隔离上下文或定制 Session 均不自动支持。检测不支持时明确拒绝，不降低游戏权限。具体证据及限制见 [验收记录](specs/002-engine-save-compat/validation.md)。
-
-某些已识别的 Tyrano 520 实现会自动转换旧存档槽。对这类实现，“使用指定的存档位置”只接受版本 2 的存档槽或尚无存档槽的目录；发现旧格式会停止检查并保留原文件。
-
-保留原游戏已有的清档、重置和刷新/重载功能。清档沿用原确认流程，先做操作前备份；刷新会重新建立保护，继续使用同一位置。加载失败不能当作新游戏覆盖存档；清档中断须先核对操作前备份。未知或远程页面不获得适配文件操作能力；这不构成对游戏本身的文件系统沙箱。
-
-备份位于 `.launcher/games/<id>/save-backups/<backup-id>/`，存在记录位于同级 `save-state/`。启用/更换位置及原游戏清档前会备份，正常保存使用原子文件替换；这些是操作前副本，不是周期备份或多文件原子事务。
-
-恢复前关闭游戏和启动器，另存当前配置、全部备份、存在记录及当前存档，核对备份清单、归属及 SHA-256。在隔离副本先按清单恢复；同名文件和多余存档先另存，不能删除整个目录覆盖。恢复后在正常设置中重新检查并确认；有未完成清档时，必须先恢复到操作前完整集合。不要删除存在记录绕过检查。完整步骤见 [人工恢复与回退](specs/002-engine-save-compat/quickstart.md#7-人工恢复与回退)。
-
-停用需停止游戏后关闭开关并保存；只影响下次启动，保留全部副本，不搬移文件，原始引擎可能重新读取另一位置。“恢复配置”不恢复存档。回退旧启动器时另存当前 v2 配置后使用升级前 v1 原件，不能手工删除策略字段冒充回退。
-
-## 验证
-
-```sh
-node tests/core.test.js
-node tests/save-policy.test.js
-node tests/runtime-manager.test.js
-```
-
-同时使用自备 Electron 的 Node 模式验证共享代码：
-
-```sh
-ELECTRON_RUN_AS_NODE=1 '/path/to/Electron.app/Contents/MacOS/Electron' tests/core.test.js
-ELECTRON_RUN_AS_NODE=1 '/path/to/Electron.app/Contents/MacOS/Electron' tests/save-policy.test.js
-```
-
-图形回归只使用仓库自有合成应用，并从空游戏库开始：
-
-```sh
-LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command --library-smoke-test --test-root='/absolute/isolated/test-directory'
-```
-
-窗口关闭与进程退出回归：`node tests/lifecycle-smoke.js "/path/to/Electron.app/Contents/MacOS/Electron"`，仅使用自有夹具及新建临时目录。
-
-测试根必须与正式配置和已登记游戏目录分离。没有 npm test 或 lint 脚本。
-
-## 公开发布
-
-发布前运行 `node scripts/audit-publication.js`，检查全部可达 Git 历史的敏感路径、生成数据和常见凭据格式。
-审计不代替人工检查自定义秘密或第三方内容权利。隐私处理范围见 [公开发布记录](docs/PUBLICATION.md)，治理见 [Constitution](.specify/memory/constitution.md)。
+[运行环境管理](specs/003-runtime-management/spec.md) · [存档兼容限制](specs/002-engine-save-compat/validation.md) · [存档恢复步骤](specs/002-engine-save-compat/quickstart.md#7-人工恢复与回退)
