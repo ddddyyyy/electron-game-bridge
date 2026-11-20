@@ -53,7 +53,7 @@ jobs:
           compression-level: 0
 
   release:
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
     permissions:
