@@ -8,8 +8,8 @@ function defaults() {
 }
 module.exports = { metadata, defaults };
 module.exports.inspectSaveProfile=game=>require('./tyrano-save/profile').inspect(game);
-module.exports.validateSaveBytes=(bytes,name)=>require('./tyrano-save/profile').validateSaveBytes(bytes,name);
-module.exports.encodeSave=(value,name)=>require('./tyrano-save/profile').encodeSave(value,name);
+module.exports.validateSaveBytes=(bytes,name,profile)=>require('./tyrano-save/profile').validateSaveBytes(bytes,name,profile);
+module.exports.encodeSave=(value,name,profile)=>require('./tyrano-save/profile').encodeSave(value,name,profile);
 function describe(game,runtime,context) {
   const entry = applicationEntry(game);
   const cwd = path.resolve(game.installPath,game.workingDirectory);

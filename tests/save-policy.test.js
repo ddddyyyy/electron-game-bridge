@@ -6,13 +6,13 @@ const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'launcher-save-p
 const config=require('../core/config');
 const adapters=require('../adapters');
 const copy=require('./save-hook-smoke').copy;
-function scenario(name,io) {
+function scenario(name,io,inspect=adapters.inspectSaveProfile) {
   const install=path.join(root,name,'game 中文');copy(path.join(__dirname,'fixtures/tyrano-save'),install);
   fs.mkdirSync(path.join(install,'resources'));
   const game={id:'game-a',installPath:install,entry:'.',workingDirectory:'.',adapterId:'electron-app',args:[],name:'fixture'};
   const state={token:'test-token',library:{schemaVersion:1,revision:0,games:[game],runtimes:[]}};
   const context={dataRoot:path.join(root,name,'library')};
-  const service=fs.existsSync(path.resolve(__dirname,'../core/save-policy.js'))?require('../core/save-policy').create(context,{inspect:adapters.inspectSaveProfile,validate:adapters.validateSaveBytes,encode:adapters.encodeSave,io}):{inspect:()=>({candidates:[]})};
+  const service=fs.existsSync(path.resolve(__dirname,'../core/save-policy.js'))?require('../core/save-policy').create(context,{inspect,validate:adapters.validateSaveBytes,encode:adapters.encodeSave,io}):{inspect:()=>({candidates:[]})};
   return {game,state,context,service};
 }
 function write(game,location,value) {const dir=location==='install'?game.installPath:path.join(game.installPath,'resources');fs.writeFileSync(path.join(dir,'fixture_save_sf.sav'),escape(JSON.stringify(value)));}
@@ -46,6 +46,26 @@ try {
   assert.throws(()=>apply(privateLink,'install'),e=>e.code==='SAVE_BACKUP_FAILED');assert.deepStrictEqual(fs.readdirSync(outside),[]);
   const badShape=scenario('invalid-shape');fs.writeFileSync(path.join(badShape.game.installPath,'fixture_save_tyrano_data.sav'),escape(JSON.stringify({data:'invalid'})));
   assert.throws(()=>badShape.service.inspect(badShape.game,badShape.state),e=>e.code==='SAVE_FORMAT_INVALID');
+  const versioned=scenario('versioned-slots',undefined,game=>{
+    const result=adapters.inspectSaveProfile(game);result.profile.slotVersion='2';return result;
+  });
+  const versionedFile=path.join(versioned.game.installPath,'fixture_save_tyrano_data.sav');
+  const legacySlot={kind:'save',hash:'fixture-origin',data:[]};
+  const legacyBytes=escape(JSON.stringify(legacySlot));
+  fs.writeFileSync(versionedFile,legacyBytes);
+  const unsupportedVersion=e=>e.code==='SAVE_SLOT_VERSION_UNSUPPORTED';
+  assert.throws(()=>versioned.service.inspect(versioned.game,versioned.state),unsupportedVersion);
+  assert.strictEqual(fs.readFileSync(versionedFile,'utf8'),legacyBytes);
+  const currentBytes=escape(JSON.stringify(Object.assign({version:'2'},legacySlot)));
+  fs.writeFileSync(versionedFile,currentBytes);
+  versioned.game.savePolicy=apply(versioned,'install');
+  const versionedSession=versioned.service.openSession(versioned.game,versioned.state.library);
+  assert.strictEqual(JSON.parse(versionedSession.read('fixture_save_tyrano_data')).version,'2');
+  assert.throws(()=>versionedSession.write('fixture_save_tyrano_data',legacySlot),unsupportedVersion);
+  assert.strictEqual(fs.readFileSync(versionedFile,'utf8'),currentBytes);
+  fs.writeFileSync(versionedFile,legacyBytes);
+  assert.throws(()=>versioned.service.validate(versioned.game,versioned.state.library),unsupportedVersion);
+  assert.strictEqual(fs.readFileSync(versionedFile,'utf8'),legacyBytes);
   const operations=['openSync','writeFileSync','closeSync','fsyncSync','renameSync'];
   let counting=false;const counts={},countIO=Object.assign({},fs);
   operations.forEach(operation=>{counts[operation]=0;countIO[operation]=function(){if(counting)counts[operation]++;return fs[operation].apply(fs,arguments);};});

@@ -35,7 +35,10 @@ function create(context,options) {
       const file=path.join(directory,name),before=io.lstatSync(file),bytes=readFile(file);
       total+=bytes.length;
       if(total>256*1024*1024||files.length>=128)throw failure('SAVE_FORMAT_INVALID','存档集合超过支持上限');
-      try{options.validate(bytes,name);}catch(_){throw failure('SAVE_FORMAT_INVALID','存档内容无法安全识别，未修改文件');}
+      try{options.validate(bytes,name,profile);}catch(error){
+        if(error.code==='SAVE_SLOT_VERSION_UNSUPPORTED')throw error;
+        throw failure('SAVE_FORMAT_INVALID','存档内容无法安全识别，未修改文件');
+      }
       const after=io.lstatSync(file);
       if(before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs)throw failure('SAVE_SCAN_STALE','扫描期间存档已变化');
       files.push({name,size:bytes.length,mtime:after.mtimeMs,sha256:sha(bytes)});
@@ -199,20 +202,20 @@ function create(context,options) {
         if(state.seenKeys.includes(name)&&!(state.pendingClear&&state.pendingClear.affectedKeys.includes(name)))throw Error('曾有的存档异常消失');
         return null;
       }
-      return options.validate(readFile(file),name);
+      return options.validate(readFile(file),name,profile);
     });}
     function readConfirmed(key) {return run(()=>{
       const name=nameFor(key),manifest=verifyBackup(game,policy);
       if(!manifest.files.some(item=>item.name===name))return null;
-      return options.validate(readFile(path.join(privateDirectory(game,['save-backups',policy.backupId,'files']),name)),name);
+      return options.validate(readFile(path.join(privateDirectory(game,['save-backups',policy.backupId,'files']),name)),name,profile);
     });}
     function write(key,value) {return run(state=>{
       const name=nameFor(key),file=path.join(directory,name);
       if(state.pendingClear&&!state.pendingClear.affectedKeys.includes(name))throw Error('清档操作越出已确认范围');
       const previous=io.existsSync(file)?readFile(file):null;
-      if(previous)options.validate(previous,name);
+      if(previous)options.validate(previous,name,profile);
       else if(state.seenKeys.includes(name)&&!state.pendingClear)throw Error('存档异常消失，不能覆盖为新进度');
-      const bytes=options.encode(value,name);
+      const bytes=options.encode(value,name,profile);
       if(bytes.length>64*1024*1024)throw Error('存档超过支持上限');
       if(!state.seenKeys.includes(name)){state.seenKeys.push(name);atomicJSON(record,state);}
       const temp=file+'.'+random()+'.tmp';exclusive(temp,bytes);

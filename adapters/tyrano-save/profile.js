@@ -34,16 +34,17 @@ function functionText(source,pattern) {
   return null;
 }
 function functionHash(text) {return text&&config.sha(Buffer.from(text.replace(/\r\n/g,'\n').trim()));}
+const VERSIONED_SLOT_INIT='86ac5f4fb9e49be4a479d57c185c26071965a34951a24340b562351467b1a83d';
 // Verified storage implementations; hashes keep game source out of this repo.
 const signatures={
-  init_game:['4e5bb476813b07e72061980fede75b78edf10707fb2fee3f7fe9cb29cd08963a','68500a19c285d6438f7000111b9509e908d165eb13f2fd289892ce48a9568b9d','b5cbb1018c50a75aa1ec81293a1de598988783bba08883759258c56f7449aa1d'],
+  init_game:['4e5bb476813b07e72061980fede75b78edf10707fb2fee3f7fe9cb29cd08963a','68500a19c285d6438f7000111b9509e908d165eb13f2fd289892ce48a9568b9d','b5cbb1018c50a75aa1ec81293a1de598988783bba08883759258c56f7449aa1d',VERSIONED_SLOT_INIT],
   getExePath:['073958f9f6cc2d794872850211a687b2a289c4b1a9d497e38c56aa699ed88a4f','7c227a81f990d15d6398dea7d7f758ea5059500a8874de73e8004b1c1be4af14','4a92c5e664fb3fec005a5641e6e6724319d9bd6158886b23931c840004c990f8'],
   localFilePath:['9a079961b29c984eab8374ddec638fc84153839e7f28a3885b24af0aef21bd5d','edb58227c642dd0d186de49f9057e632f74de6244157d5befe7f087b94d22cc8'],
   getStorageFile:['703b0f35b7b5a77cb6b388e07ff5966fa54645e79dae6e1f35081dd5d1bea576','9e752131dbce12e383f07e4c2be5ebd41182341b1ed41185a0ade038940f8d0a','73a2d9f5f4f25df7a650abb4f7bba6ee2268eaadf28fb0f6a2c4cba24accbff5'],
   setStorageFile:['eefc6ce12b4fedd8d97e852e80312a606c5935822df3e4372f0c8d248645eaca','702df7f7402ec9def6c1161bcaa344c449140218753eea2f7f8cbd6fc61c7f3b'],
   removeStorageFile:['c367158485a575bc119550c13c8994e216b3eb8a1cd0bbfb1783c1029d0fa0cb','e3abdd619f1108bcf961e01f8a1ad5160eb5967ad09f449c5db1ed478c22d187'],
   fixtureClear:['94e30a909eac1b6337909a895f9d6eb94ebba4450cb0c89b391842cb13b343ea'],
-  removeSaveData:['62f3bc3bc6613b8080a23119840cf942ec8b9787e132cf93c239712a74f0e742','501b7419b514bb1441aceb953aaeb062fbe987068f3ab48b39552cf0ed20c96e'],
+  removeSaveData:['62f3bc3bc6613b8080a23119840cf942ec8b9787e132cf93c239712a74f0e742','501b7419b514bb1441aceb953aaeb062fbe987068f3ab48b39552cf0ed20c96e','056d3a228e8dcfce9a738387eb63a0048fe693e8f75ec80660fa53b276de75f2'],
   clearVariable:['7ddc2c6b6c106cce8e73e656641c958612432cf75e8d2cbebd7dc9231fb07d41','a21a479fb1c2c939831ca28cb3ee062c2e006f5d1d8341eeef3a85f9c1c306ba','2e3eda1c62bdf27f058c1aba2503e0a08be423521b8cfecf010a84da43525fb8']
 };
 function verifiedHash(name,text) {
@@ -98,16 +99,21 @@ function inspect(game) {
       boundaries.push({name:'fixtureClear',methodHash:verifiedHash('fixtureClear',body),keys:[projectId+'_sf'],confirmationBoolean:true});
     }
     const evidence=[mainSource,html,settings].concat(sources);
-    return {status:'supported',profile:{profileId:'tyrano-file-v1',projectId,entry,page,storageFile:scripts[storageIndex],evidenceHash:config.sha(Buffer.from(evidence.join('\0'))),keys,fileNames:keys.map(key=>key+'.sav'),filePrefix:projectId+'_',fileExtension:'.sav',requiredMethods:Object.keys(methodHashes),methodHashes,layout,saveIdentity,clearBoundaries:boundaries,clearKeys:boundaries[0].keys,clearSets:boundaries.map(b=>b.keys)}};
+    // This layout tries to create a separate .bk save and convert unversioned slots.
+    const slotVersion=saveIdentity&&saveIdentity.initMethodHash===VERSIONED_SLOT_INIT?'2':null;
+    return {status:'supported',profile:{profileId:'tyrano-file-v1',projectId,entry,page,storageFile:scripts[storageIndex],evidenceHash:config.sha(Buffer.from(evidence.join('\0'))),keys,fileNames:keys.map(key=>key+'.sav'),filePrefix:projectId+'_',fileExtension:'.sav',requiredMethods:Object.keys(methodHashes),methodHashes,layout,saveIdentity,slotVersion,clearBoundaries:boundaries,clearKeys:boundaries[0].keys,clearSets:boundaries.map(b=>b.keys)}};
   }catch(error){return {status:'unsupported',code:'SAVE_UNSUPPORTED',message:error.message};}
 }
-function validateSaveBytes(bytes,name) {
+function validateSaveBytes(bytes,name,profile) {
   const value=unescape(bytes.toString('utf8'));
   const parsed=JSON.parse(value);
   if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw Error('存档顶层不是对象');
-  if(name&&/_tyrano_data\.sav$/.test(name)&&(!Array.isArray(parsed.data)||parsed.kind!=='save'||parsed.data.some(slot=>!slot||typeof slot!=='object'||Array.isArray(slot))))throw Error('存档槽集合格式无效');
+  if(name&&/_tyrano_data\.sav$/.test(name)) {
+    if(!Array.isArray(parsed.data)||parsed.kind!=='save'||parsed.data.some(slot=>!slot||typeof slot!=='object'||Array.isArray(slot)))throw Error('存档槽集合格式无效');
+    if(profile&&profile.slotVersion&&parsed.version!==profile.slotVersion)throw config.failure('SAVE_SLOT_VERSION_UNSUPPORTED','此引擎的指定存档位置仅支持版本 '+profile.slotVersion+' 的存档槽，原存档未转换');
+  }
   if(name&&/_tyrano_(?:auto|quick)_save\.sav$/.test(name)&&(!parsed.stat||!parsed.layer||!Number.isInteger(parsed.current_order_index)))throw Error('快捷存档格式无效');
   return value;
 }
-function encodeSave(value,name) {const bytes=Buffer.from(escape(JSON.stringify(value)));validateSaveBytes(bytes,name);return bytes;}
+function encodeSave(value,name,profile) {const bytes=Buffer.from(escape(JSON.stringify(value)));validateSaveBytes(bytes,name,profile);return bytes;}
 module.exports={inspect,readText,declaration,validateSaveBytes,encodeSave,functionText,functionHash};
