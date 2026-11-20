@@ -1,12 +1,12 @@
 # Data Model: 引擎存档路径兼容
 
-本文件描述待实现结构，不是对现有 library.json 的直接修改。
+本文件定义存档兼容的数据结构和约束。普通游戏的启动参数和运行环境版本探针以 [003 已确认的覆盖规则](../003-runtime-management/spec.md#本次确认与旧规格的关系) 为准。
 
 ## 1. Library 与 Game
 
-- 新版接受 schemaVersion=1/2；旧库仍读写 v1，直到第一次明确保存存档策略。升级前独占另存 v1 原件；后续普通 .bak 继续沿用现有行为，不覆盖专用升级原件。
-- v2 新增可选 Game.savePolicy。缺失/null 都表示关闭；停用不删除已完成备份。未知版本、未知字段或畸形策略保留原始字节并明确拒绝，不降级成关闭。
-- 策略属于原游戏 ID，adapterId 仍为 electron-app，原 runtimeId 自动匹配及 runtime.json 数据绑定规则不变。
+- `Library.schemaVersion` 接受 1 或 2。旧库仍读写 v1，直到第一次明确保存存档策略。升级前独占另存 v1 原件，后续普通 .bak 不覆盖专用升级原件。
+- v2 新增可选的 `Game.savePolicy`。缺失或 `null` 都表示关闭，停用保留已完成备份。未知版本、未知字段或畸形策略保留原始字节并明确拒绝。
+- 策略沿用原 `Game.id`，`Game.adapterId` 仍为 `electron-app`，`Game.runtimeId` 由程序自动匹配，沿用 runtime.json 数据绑定。
 - 回退旧程序先关闭游戏，保留 v2 与全部备份，再显式恢复升级前 v1 配置；不得删除 savePolicy 字段来伪装回退。旧程序拒绝 v2 是预期保护。
 
 ### savePolicy（仅持久化后端生成值）
@@ -31,7 +31,7 @@
 
 - 关联：游戏 ID 或新增草稿、规范化安装/入口、运行环境身份、profile/evidenceHash、库 revision/token。
 - 候选：install 和 resources 两项；含目录真实身份或不存在状态，以及该 profile 受支持文件的 name/size/mtime/hash。UI 仅接收文件名、大小和时间，不接收存档内容。
-- scanToken：主进程生成的不可猜随机令牌；绑定完整快照和以上上下文，仅当前操作有效，10 分钟失效；只保留当前编辑草稿的最新令牌，新扫描使旧令牌失效。
+- `SaveInspection.scanToken` 由主进程随机生成，绑定完整快照和以上上下文，仅当前操作有效，10 分钟失效。新扫描使旧令牌失效。
 - 禁止读取内容作规划研究；实施时用户发起的正式扫描可按功能需要有界读取、校验和计算摘要，不把内容写入日志或发送到 UI。
 - 元数据/文件变化、草稿变化、库 token 变化、源证据变化都使令牌无效。应用时重新完整扫描，不只比较 mtime。
 - 单个已存在目录必须可读；不存在的 resources 可作为无存档候选显示，但不能被选为写入目标；不自动创建游戏内部目录。安装根目录始终必须存在。
@@ -40,7 +40,9 @@
 
 存放在 .launcher/games/<game-id>/save-backups/<backup-id>/manifest.json，备份文件为同目录中的 files/<原文件名>；目录 0700、文件 0600。ID、相对文件名全部由后端限制，不从配置拼接任意路径。
 
-清单 version、backupId、gameId、createdAt、profileId、projectId、sourceLocation、sourceDirectoryIdentity、files[]；每项 name/size/sha256/mtime；purpose 区分 policy-change 与 pre-clear，pre-clear 另关联清档 operationId；受影响键集合记在对应 pendingClear，备份仍保存所选目录完整集合。清单状态为 complete，且所有文件存在、校验一致才可引用。临时目录以独立随机名称创建，不完整目录永远不计成功。
+清单字段以 `BackupManifest` 为实体名。`version` 当前为 1，`backupId` 由后端随机生成，`gameId` 对应原游戏，`createdAt` 记录 ISO 8601 时间，`profileId`、`projectId` 记录适配身份。`sourceLocation` 为 `install` 或 `resources`，`sourceDirectoryIdentity` 记录目录的 `realPath`、`dev` 和 `ino`。`files[]` 每项含 `name`、`size`、`sha256`、`mtime`。
+
+`purpose` 为 `policy-change` 或 `pre-clear`。`operationId` 在清档前备份中关联该次操作，普通策略备份为 `null`。清档影响的文件记在 `SavePresence.pendingClear.affectedKeys`，备份包含所选目录完整集合。`state` 为 `complete`，且所有备份文件存在、校验一致时才可引用。未完成目录使用独立随机名称。
 
 事务：
 
@@ -54,7 +56,19 @@
 
 ## 4. SavePresence（最小存在记录）
 
-每次确认对应 .launcher/games/<id>/save-state/<backup-id>.json，保存 version、gameId、backupId、profile/evidenceHash、directoryIdentity、seenKeys，以及可选 pendingClear（operationId、backupId、affectedKeys、阶段）。文件为 0600，使用与其他元数据相同的原子保存；不是存档内容备份，不创建周期备份功能。
+每次确认对应 `.launcher/games/<id>/save-state/<backup-id>.json`。文件权限为 0600，采用原子保存，记录存档文件是否曾存在。
+
+| 字段 | 约束 |
+| --- | --- |
+| `SavePresence.version` | 当前写入 1 |
+| `SavePresence.gameId`、`SavePresence.backupId` | 分别对应原游戏和本次策略引用的完整备份 |
+| `SavePresence.profileId`、`SavePresence.evidenceHash` | 分别记录策略的适配标识和 SHA-256 证据摘要 |
+| `SavePresence.directoryIdentity` | 记录选定目录的 `realPath`、`dev` 和 `ino` |
+| `SavePresence.seenKeys` | 已存在过的受支持存档文件名数组 |
+| `SavePresence.pendingClear` | 可选，记录尚未完成的清档或保留的恢复记录 |
+| `SavePresence.pendingClear.operationId`、`SavePresence.pendingClear.backupId` | 本次清档的随机操作 ID 和独立清档前备份 ID |
+| `SavePresence.pendingClear.affectedKeys` | 原清档边界允许操作的存档文件名数组 |
+| `SavePresence.pendingClear.phase` | `prepared` 表示清档前备份已完成，清档尚未确认成功。正常清档成功后删除整个 `pendingClear`。`restored` 写在核对恢复内容后的旧记录中，新策略引用重新确认生成的新记录。 |
 
 确认时以选定集合初始化，在提交策略之前完成；启动前结合该记录验证曾存在的键仍可读取。首次新增某键时，guard 必须先持久化 seenKeys，再写对应存档；记录更新失败则不写存档。即使新文件最终没写成功，下一次也安全拒绝并要求核对，不把未知状态当空进度。
 
@@ -62,9 +76,9 @@
 
 ## 5. LaunchSaveContext（一次启动的私有描述）
 
-只在策略启用时创建；含 gameId、profile/evidence、选定目录与键集合、备份引用和一次性 nonce；实际运行环境身份仍由既有 runtime.json 绑定及启动探针核对，不在描述中重复。置于该游戏 .launcher 私有目录，0600 独占写入；不复用旧描述，不接受用户参数覆盖；仅清理本次创建的临时文件。
+只在策略启用时创建。`LaunchSaveContext.version` 当前为 1，`LaunchSaveContext.gameId` 对应原游戏，`LaunchSaveContext.profile` 包含适配证据和键集合，`LaunchSaveContext.selectedDirectory` 是已确认目录的绝对路径，`LaunchSaveContext.game.savePolicy.backupId` 引用完整备份，`LaunchSaveContext.nonce` 是每次启动生成的 32 个十六进制字符。实际运行环境身份由既有 runtime.json 绑定及启动探针核对。描述文件在游戏私有数据目录以 0600 独占写入，每次启动单独创建，仅清理本次创建的文件。
 
-子进程通过固定 main-hook 读取描述。使用 child_process 的额外单向 stdio 管道（fd 3）发送有界 JSON 行状态，stdout/stderr 继续写现有日志；不会从日志文本解析授权状态。未启用游戏保留原有 stdio 和 argv。
+子进程通过固定 main-hook 读取描述，经额外单向 stdio 管道（fd 3）发送有界 JSON 行状态，stdout/stderr 继续写现有日志。未启用游戏沿用原 stdio，无存档描述或状态管道。固定生命周期模块适用于所有受管游戏，见 [003 覆盖说明](../003-runtime-management/spec.md#本次确认与旧规格的关系)。
 
 ## 6. 状态转换
 

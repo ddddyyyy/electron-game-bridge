@@ -35,12 +35,15 @@
 - [X] T008 分别用 Electron 7.1.2、26.6.10 执行 T005 门槛，验证 fd 3 继承、主进程/renderer 时序以及原刷新/重载前门禁重新关闭、旧 ready 不复用，在 `specs/002-engine-save-compat/validation.md` 记录证据；任何组合不能保证首读前安装或失败零写入时，停止开放该组合，不能用修改游戏包或权限绕过。
 - [X] T009 在 `tests/core.test.js` 增加 v1/v2、缺失/null 策略为关闭、未知字段与版本拒绝、升级原件另存、普通编辑保留策略及配置恢复回归，验证读取 v1 时字节不变。
 - [X] T010 在 `core/config.js` 实现 schemaVersion 1/2 读取与策略校验；仅首次明确保存策略才写 v2 并独占保留升级前 v1 原件，沿用 revision/token、备份和原子提交；不吞掉畸形策略或通过删除字段伪装回退。
+  - 字段约束见 [`Library.schemaVersion`、`Game.savePolicy`](data-model.md#1-library-与-game)。
 
 ### 扫描与备份事务
 
 - [X] T011 在新增 `tests/save-policy.test.js` 编写纯 Node 可运行的扫描、目录身份、令牌及备份断言：两个候选、摘要与集合变化、10 分钟过期、未知键/损坏格式、128 文件/64 MiB 单文件/256 MiB 集合限制、符号链接/硬链接/目录替换/跨游戏别名、open/write/close/fsync/hash/rename 及父目录同步故障。
 - [X] T012 在新增 `core/save-policy.js` 实现固定 install/resources 候选扫描、目录真实身份、跨游戏归属检查及主进程临时 scanToken；绑定草稿/引擎/运行环境证据与配置 token、两处完整快照，最新令牌替代旧令牌，应用前重新扫描；UI 不提交任意路径或可信指纹。
+  - 字段约束见 [`SaveInspection.scanToken`](data-model.md#2-saveinspection临时扫描结果)。
 - [X] T013 在 `core/save-policy.js` 实现私有随机目录中的完整集合备份、manifest、校验/fsync/完成改名及 SavePresence 原子初始化，并复用完成备份机制提供清档前 pre-clear 快照及归属信息；全空集合仍生成清单，配置仅可引用完成备份；配置失败保留独立备份，源存档不动，不完整资料不算成功也不自动清理。
+  - 字段约束见 [`Game.savePolicy.version`、`Game.savePolicy.profileId`、`Game.savePolicy.evidenceHash`、`Game.savePolicy.projectId`、`Game.savePolicy.location`、`Game.savePolicy.directoryIdentity`、`Game.savePolicy.directoryIdentity.realPath`、`Game.savePolicy.directoryIdentity.dev`、`Game.savePolicy.directoryIdentity.ino`、`Game.savePolicy.backupId`、`Game.savePolicy.otherSnapshot`、`Game.savePolicy.hadSaves`](data-model.md#savepolicy仅持久化后端生成值)；[`BackupManifest.version`、`BackupManifest.backupId`、`BackupManifest.gameId`、`BackupManifest.createdAt`、`BackupManifest.profileId`、`BackupManifest.projectId`、`BackupManifest.sourceLocation`、`BackupManifest.sourceDirectoryIdentity`、`BackupManifest.sourceDirectoryIdentity.realPath`、`BackupManifest.sourceDirectoryIdentity.dev`、`BackupManifest.sourceDirectoryIdentity.ino`、`BackupManifest.files[]`、`BackupManifest.files[].name`、`BackupManifest.files[].size`、`BackupManifest.files[].sha256`、`BackupManifest.files[].mtime`、`BackupManifest.purpose`、`BackupManifest.operationId`、`BackupManifest.state`](data-model.md#3-backupmanifest)；[`SavePresence.version`、`SavePresence.gameId`、`SavePresence.backupId`、`SavePresence.profileId`、`SavePresence.evidenceHash`、`SavePresence.directoryIdentity`、`SavePresence.directoryIdentity.realPath`、`SavePresence.directoryIdentity.dev`、`SavePresence.directoryIdentity.ino`、`SavePresence.seenKeys`](data-model.md#4-savepresence最小存在记录)。
 - [X] T014 在 `library-main.js` 增加覆盖 saveGame/saveRuntime/restoreConfig/launchGame 准备阶段的单操作锁，跨异步探测保持占用，保留既有 sender/URL 校验和 Runner.busy；恢复配置使扫描令牌失效，运行中禁止产生新确认令牌，后端不依赖 UI 禁用按钮。
 
 **Checkpoint**: T008 必须有合成证据，T009/T011 的安全断言通过后才能进入用户场景。锁不保护其他程序对游戏目录的外部写入；检测到变化必须拒绝，不能声称形成文件系统沙箱。
@@ -59,8 +62,11 @@
 ### Implementation
 
 - [X] T017 [US1] 在 `library-main.js` 与 `library-preload.js` 增加固定 inspectSavePolicy 操作及 saveGame 的 saveChoice 扩展；后端分配稳定游戏 ID、重新核对令牌、先完成备份/存在记录再提交配置；无 saveChoice 保留旧策略，新游戏默认关闭，前端不能注入 savePolicy 字段。复用基础层已实现的双候选显式确认与备份规则，不增加阶段开关；完整双候选界面/故障验收仍由 US2 完成。
+  - 字段约束见 [`Game.id`、`Game.savePolicy`、`Game.adapterId`、`Game.runtimeId`](data-model.md#1-library-与-game)；[`SaveInspection.scanToken`](data-model.md#2-saveinspection临时扫描结果)。
 - [X] T018 [US1] 在 `adapters/tyrano-save/preload.js` 完成受控文件存储：全部必需方法接管与集合格式验证后才 ready；首次新键先持久化 SavePresence，保存用同目录临时文件、完整编码/校验/fsync/关闭后原子替换；读取/解析失败永久 poisoned，游戏捕获异常后仍禁写，保留原清档确认及作用范围，先完成 pre-clear 备份与 pendingClear 记录，再受控删除/重置，完成后同步 seenKeys；取消/备份失败不清档，清档中断保留副本并禁写，读取失败后的自动清档仍拒绝，替换后同步失败报告结果不确定且不自动回滚。
+  - 字段约束见 [`SavePresence.seenKeys`、`SavePresence.pendingClear`、`SavePresence.pendingClear.operationId`、`SavePresence.pendingClear.backupId`、`SavePresence.pendingClear.affectedKeys`、`SavePresence.pendingClear.phase`](data-model.md#4-savepresence最小存在记录)。
 - [X] T019 [US1] 在 `adapters/index.js` 与 `adapters/tyrano-save/main-hook.js` 组合已确认策略的启动描述、固定预载参数、0600 一次性描述和 nonce；只对启用游戏设置私有描述环境，未启用时清除继承残留；复核备份/存在记录、引擎证据、目录及未选候选基线，不能用原始启动静默回退。
+  - 字段约束见 [`LaunchSaveContext.version`、`LaunchSaveContext.gameId`、`LaunchSaveContext.profile`、`LaunchSaveContext.selectedDirectory`、`LaunchSaveContext.game.savePolicy.backupId`、`LaunchSaveContext.nonce`](data-model.md#5-launchsavecontext一次启动的私有描述)。
 - [X] T020 [US1] 在 `core/launch.js` 集成策略验证及 adapting 生命周期；仅启用会话新增 fd 3 单向状态管道，按契约限制单行 8 KiB/每次页面接入 64 KiB；状态消息核对当前 documentGeneration，原刷新/重载时保持 busy 并重新 adapting/握手，旧代次 ready 与 PID/armed 不当作当前就绪，超时/EPIPE/消息错误终止并等待退出后释放 busy，保留 stdout/stderr 日志及实际运行环境检查。
 - [X] T021 [US1] 在 `ui/index.html` 与 `ui/styles.css` 的原游戏设置面板加入存档兼容开关、只读识别、单候选确认、备份说明和详情实际位置，沿用暖白/森林绿 C 风格，不新增导航、任意目录选择或恢复管理面板。
 - [X] T022 [US1] 在 `ui/library.js` 接入扫描/确认/保存状态，丢弃旧异步响应和过期草稿令牌；显示扫描/备份/保存阶段，取消不提交、失败保留输入、停止后才可操作，并保持键盘/焦点/aria-live/textContent 与独立运行环境登记行为。
@@ -83,6 +89,7 @@
 
 - [X] T026 [US2] 在 `core/save-policy.js` 完成双候选选择和长期冲突基线：同内容也不自动选择；正常选定文件更新可续玩，未选集合新增/变化或旧目录替换要求重新确认；仅 resources 有存档时确认该处，禁止空集合选择不存在目录。
 - [X] T027 [US2] 在 `library-main.js` 与 `core/config.js` 扩展显式位置变更、重新确认及停用事务：重新备份后提交，保留旧备份，配置恢复不当作存档恢复；禁止无 saveChoice 的普通编辑丢失策略，也不信任已恢复配置中的过期备份引用。
+  - 字段约束见 [`SavePresence.pendingClear.phase`](data-model.md#4-savepresence最小存在记录)。
 - [X] T028 [US2] 在 `ui/index.html`、`ui/library.js` 与 `ui/styles.css` 开放两个候选的单选和文件/时间展示；有旧文件无默认选中，提示不合并、备份及停用后可能读取另一位置；保留同窗口布局、失败输入和焦点，不新增持久草稿或自动覆盖按钮。
 - [X] T029 [US2] 按 `specs/002-engine-save-compat/quickstart.md` 在合成隔离集合演练人工恢复与 v2→v1 程序回退，将先保留当前进度、清单/hash 校验、多余存档另存、SavePresence 不匹配需重确认、未完成 pendingClear 还原核对及配置/存档分开恢复的实测结果和可复现步骤记录到 `specs/002-engine-save-compat/validation.md`；不新增恢复服务。
 - [X] T030 [US2] 运行 `tests/save-policy.test.js` 的 Node 12 兼容与故障矩阵、`tests/library-smoke.js` 的双候选/取消/备份失败/配置失败/恢复交错回归，核对两种运行环境中未选集合和原配置保持不变，在 `specs/002-engine-save-compat/validation.md` 逐项记录通过或未执行。
