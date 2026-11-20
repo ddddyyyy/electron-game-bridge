@@ -2,12 +2,19 @@ name: Release macOS app
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to publish (leave blank for a build only)
+        type: string
   push:
     tags:
       - 'v*'
 
 permissions:
   contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
 
 jobs:
   build:
@@ -24,9 +31,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ env.RELEASE_TAG && format('refs/tags/{0}', env.RELEASE_TAG) || github.sha }}
       - name: Check release version
-        if: github.ref_type == 'tag'
-        run: test "$GITHUB_REF_NAME" = "v$(node -p 'require("./package.json").version')"
+        if: env.RELEASE_TAG != ''
+        run: test "$RELEASE_TAG" = "v$(node -p 'require("./package.json").version')"
       - name: Test launcher logic
         run: |
           node tests/core.test.js
@@ -53,9 +61,13 @@ jobs:
           compression-level: 0
 
   release:
-    if: github.ref_type == 'tag'
+    if: inputs.release_tag != '' || github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: macos-release-${{ inputs.release_tag || github.ref_name }}
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -69,9 +81,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           assets=("Electron-Game-Bridge-${version}-macos-arm64.zip" "Electron-Game-Bridge-${version}-macos-x64.zip")
           sha256sum "${assets[@]}" > SHA256SUMS.txt
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "Electron Game Bridge $GITHUB_REF_NAME" \
-            --notes 'Download the ZIP for your Mac (arm64 for Apple silicon, x64 for Intel), then extract and open Electron Game Bridge.app. The app includes Electron. This build is ad hoc signed and has no Apple notarization.'
+          if draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft); then
+            if [ "$draft" != true ]; then
+              echo "Release $RELEASE_TAG is already published."
+              exit 0
+            fi
+          else
+            gh release create "$RELEASE_TAG" --draft --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --generate-notes --title "Electron Game Bridge $RELEASE_TAG" \
+              --notes 'Download the ZIP for your Mac (arm64 for Apple silicon, x64 for Intel), then extract and open Electron Game Bridge.app. The app includes Electron. This build is ad hoc signed and has no Apple notarization.'
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
