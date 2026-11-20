@@ -41,7 +41,8 @@ function start(context,options) {
   app.on('ready',()=>{
     window=new BrowserWindow({width:1280,height:840,minWidth:660,minHeight:560,title:'游戏库',webPreferences:{nodeIntegration:false,contextIsolation:true,enableRemoteModule:false,preload:path.join(context.root,'library-preload.js')}});
     window.webContents.on('will-navigate',(event,url)=>{if(url!==expected)event.preventDefault();});
-    window.webContents.on('new-window',e=>e.preventDefault());
+    if(window.webContents.setWindowOpenHandler)window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+    else window.webContents.on('new-window',e=>e.preventDefault());
     window.on('close',event=>{if(runner.busy||operationBusy){event.preventDefault();dialog.showMessageBox(window,{type:'info',message:operationBusy?'正在处理配置，请稍候。':'请先退出正在运行的游戏，再关闭游戏库。',buttons:['返回游戏库']});}});
     runner.on('state',value=>{if(!window.isDestroyed())window.webContents.send('launcher:state',value);});
     const actions={
@@ -140,8 +141,17 @@ function start(context,options) {
         finally{if(locked)operationBusy=false;}
       }catch(error){console.error('[library]',error.code||'FAILED',error.message);return {ok:false,code:error.code||'FAILED',message:error.message,fieldErrors:error.fieldErrors};}
     });
-    window.loadFile(path.join(context.root,'ui/index.html'));
-    if(options.librarySmoke)require('./tests/library-smoke').runUI(window,{store,context,runner,runtimeManager}).then(()=>app.exit(0),error=>{console.error(error);if(runner.child)runner.child.kill();app.exit(1);});
+    const loaded=window.loadFile(path.join(context.root,'ui/index.html'));
+    if(options.librarySmoke){
+      const check=app.isPackaged?loaded.then(()=>window.webContents.executeJavaScript(`(async()=>{
+        const state=await window.launcher.readLibrary();
+        const games=document.getElementById('games');
+        for(let i=0;i<100&&!games.textContent.includes('还没有游戏');i++)await new Promise(resolve=>setTimeout(resolve,50));
+        return !state.error&&state.library.games.length===0&&games.textContent.includes('还没有游戏');
+      })()`)).then(ok=>{if(!ok)throw Error('Packaged library did not render an empty library');console.log('PASS packaged library');})
+        :require('./tests/library-smoke').runUI(window,{store,context,runner,runtimeManager});
+      check.then(()=>app.exit(0),error=>{console.error(error);if(runner.child)runner.child.kill();app.exit(1);});
+    }
   });
   app.on('window-all-closed',()=>app.quit());
 }

@@ -10,15 +10,13 @@ Keep the EXE and resources from the Windows distribution together. The folder yo
 
 ## Quick start
 
-1. Before opening the launcher for the first time, download and unpack an `Electron.app` build for your Mac. No `npm install` is required. [Official Electron releases](https://github.com/electron/electron/releases)
-2. Run the following command from the project folder, replacing the example path with your own. You can also put `Electron.app` in the project's `runtime/` folder and double-click `启动游戏库.command`.
+1. Download the ZIP for your Mac. Choose `arm64` for Apple silicon or `x64` for Intel. Unzip it and open `Electron Game Bridge.app`. The app includes its own Electron runtime and requires macOS 13 or later. [Download for macOS](https://github.com/ddddyyyy/electron-game-bridge/releases/latest)
+2. Click **添加游戏** (Add game), enter a name, and select the complete distribution folder. Leave the entry point set to `.` to detect the packaged resources automatically. Once the required version is identified, register a local Electron build or click **从官网安装匹配版本** (Install matching version).
+3. Click **保存设置** (Save settings), select the game in the library, then click **启动游戏** (Launch game).
 
-   ```sh
-   LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command
-   ```
+The release is ad hoc signed and has no Apple notarization. macOS may ask you to approve the app in **System Settings → Privacy & Security** the first time you open it. [Apple Support](https://support.apple.com/en-us/102445)
 
-3. Click **添加游戏** (Add game), enter a name, and select the complete distribution folder. Leave the entry point set to `.` to detect the packaged resources automatically. Once the required version is identified, register a local Electron build or click **从官网安装匹配版本** (Install matching version).
-4. Click **保存设置** (Save settings), select the game in the library, then click **启动游戏** (Launch game).
+To run from source, download an official `Electron.app` and run `LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command` from the project folder. [Official Electron releases](https://github.com/electron/electron/releases)
 
 ## Screenshots
 
@@ -38,6 +36,6 @@ The screenshots show the launcher’s Chinese interface with synthetic test game
 
 ## Local data and documentation
 
-The launcher stores game settings and its default per-game data directories under `.launcher/`. If the configuration is damaged, use **配置恢复** (Configuration recovery) to restore the last valid library configuration. See `logs/launcher.log` and `logs/games/` for launch diagnostics.
+The packaged app stores settings, default game data, and logs under `~/Library/Application Support/Electron Game Bridge/`. Running from source keeps using `.launcher/` and `logs/` in the project folder. If the configuration is damaged, use **配置恢复** (Configuration recovery) to restore the last valid library configuration.
 
 [Runtime management](specs/003-runtime-management/spec.md) · [Save compatibility limits](specs/002-engine-save-compat/validation.md) · [Save recovery steps](specs/002-engine-save-compat/quickstart.md#7-人工恢复与回退) (Chinese)

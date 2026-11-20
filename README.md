@@ -10,15 +10,13 @@
 
 ## 快速开始
 
-1. 首次打开游戏库前，下载并解压适合你的 Mac 的 `Electron.app`，无需运行 `npm install`。[Electron 官方发行页](https://github.com/electron/electron/releases)
-2. 在项目目录中运行以下命令，将示例路径换成本机路径。也可以把 `Electron.app` 放到项目的 `runtime/` 目录，再双击 `启动游戏库.command`。
+1. 从发布页下载对应的 ZIP。Apple 芯片选 `arm64`，Intel 芯片选 `x64`。解压后打开 `Electron Game Bridge.app`。发布包内置启动器使用的 Electron，要求 macOS 13 或更新版本。[下载 macOS 版](https://github.com/ddddyyyy/electron-game-bridge/releases/latest)
+2. 点击 **添加游戏**，输入名称并选择完整发行目录。应用入口保留默认的 `.` 即可自动查找打包资源。识别到所需版本后，可以登记已有 Electron，或点击 **从官网安装匹配版本**。
+3. 点击 **保存设置**，回到游戏库选中该游戏，再点击 **启动游戏**。
 
-   ```sh
-   LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command
-   ```
+发布包采用临时签名，尚未经过 Apple 公证。首次打开时，macOS 可能要求在 **系统设置 → 隐私与安全性** 中确认。[Apple 支持](https://support.apple.com/zh-cn/102445)
 
-3. 点击 **添加游戏**，输入名称并选择完整发行目录。应用入口保留默认的 `.` 即可自动查找打包资源。识别到所需版本后，可以登记已有 Electron，或点击 **从官网安装匹配版本**。
-4. 点击 **保存设置**，回到游戏库选中该游戏，再点击 **启动游戏**。
+从源码启动时，请自备官方 `Electron.app`，在项目目录中运行 `LAUNCHER_ELECTRON='/path/to/Electron.app' ./启动游戏库.command`。[Electron 官方发行页](https://github.com/electron/electron/releases)
 
 ## 界面预览
 
@@ -38,6 +36,6 @@
 
 ## 本地数据与文档
 
-游戏设置和启动器分配的默认游戏数据目录保存在 `.launcher/`。配置损坏时，可从 **配置恢复** 恢复最近一次有效的游戏库配置。启动诊断见 `logs/launcher.log` 和 `logs/games/`。
+发布版把设置、默认游戏数据和日志保存在 `~/Library/Application Support/Electron Game Bridge/`。源码运行时沿用项目目录下的 `.launcher/` 和 `logs/`。配置损坏时，可从 **配置恢复** 恢复最近一次有效的游戏库配置。
 
 [运行环境管理](specs/003-runtime-management/spec.md) · [存档兼容限制](specs/002-engine-save-compat/validation.md) · [存档恢复步骤](specs/002-engine-save-compat/quickstart.md#7-人工恢复与回退)
