@@ -197,6 +197,21 @@ module.exports.runUI = async function (window, services) {
     assert.strictEqual(await run("document.getElementById('save-next-path').textContent"),saveFixture,'A scan must not hide or change the saved position');
     await run("document.getElementById('save').click()");await wait("document.getElementById('fields-error').textContent.includes('变化') && !document.getElementById('save').disabled");
     assert.deepStrictEqual(fs.readFileSync(services.store.file),storedBeforeConflict);
+    await run("document.querySelector('[name=save-location][value=resources]').click()");
+    const scanFile=path.join(saveFixture,'resources/fixture_save_sf.sav');
+    const invalidSave='%7Bbroken';
+    fs.writeFileSync(scanFile,invalidSave);
+    try {
+      await run("document.getElementById('inspect-saves').onclick()");
+      assert((await run("document.getElementById('save-inspection').textContent")).includes('无法安全识别'));
+      assert.strictEqual(await run("document.querySelectorAll('[name=save-location]').length"),0,'Failed re-scan must remove old candidates and selection');
+      assert.strictEqual(await run("document.getElementById('save-current-path').textContent"),saveFixture);
+      assert.strictEqual(await run("document.getElementById('inspect-saves').disabled"),false);
+      assert.deepStrictEqual(fs.readFileSync(services.store.file),storedBeforeConflict);
+      assert.strictEqual(fs.readFileSync(scanFile,'utf8'),invalidSave);
+    }finally{fs.writeFileSync(scanFile,secondProgress);}
+    await run("document.getElementById('inspect-saves').onclick()");
+    assert.strictEqual(await run("document.querySelectorAll('[name=save-location]:checked').length"),0);
     await run("document.querySelector('[name=save-location][value=resources]').click();document.getElementById('save-next-path').scrollIntoView({block:'center'})");
     assert.strictEqual(await run("document.getElementById('save-current-path').textContent"),saveFixture);
     assert.strictEqual(await run("document.getElementById('save-next-path').textContent"),path.join(saveFixture,'resources'));

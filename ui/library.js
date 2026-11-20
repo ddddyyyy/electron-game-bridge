@@ -176,12 +176,13 @@ $('save-enabled').onchange=()=>{saveDirty=true;showSaveLocation();};
 $('inspect-saves').onclick=async()=>{
   if(busy||saving||registering||saveScanPending)return;const sequence=++saveSequence;
   saveScanPending=true;
+  savePreview=null;$('save-candidates').textContent='';showSaveLocation();
   $('save-inspection').textContent='正在检查存档位置…';setBusy(busy);
   try {
     const preview=await window.launcher.inspectSavePolicy({revision:state.library.revision,token:state.token,game:formGame()});
     if(sequence!==saveSequence||$('settings-panel').hidden)return;
     savePreview=preview;editingId=preview.gameId;$('save-enabled').disabled=false;
-    $('save-inspection').textContent='这款游戏支持指定存档位置，请选择要读取和保存进度的文件夹。';$('save-candidates').textContent='';
+    $('save-inspection').textContent='这款游戏支持指定存档位置，请选择要读取和保存进度的文件夹。';
     const empty=preview.candidates.every(c=>!c.files.length);
     preview.candidates.forEach(candidate=>{
       const label=document.createElement('label');label.className='save-choice';
