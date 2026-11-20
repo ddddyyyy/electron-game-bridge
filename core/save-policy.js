@@ -167,6 +167,8 @@ function create(context,options) {
     const result=scan(game),selected=result.candidates.find(c=>c.location===policy.location),other=result.candidates.find(c=>c.location!==policy.location);
     if(result.profile.evidenceHash!==policy.evidenceHash||result.profile.projectId!==policy.projectId||!selected.exists||!same(selected.directoryIdentity,policy.directoryIdentity)||!same(other,policy.otherSnapshot))throw failure('SAVE_CONFIRM_REQUIRED','存档目录、引擎或另一个候选已变化，请重新确认');
     ownership(game,selected.directoryIdentity,library);
+    try {io.accessSync(selected.directoryIdentity.realPath,fs.constants.W_OK|fs.constants.X_OK);}
+    catch (_) {throw failure('SAVE_DIRECTORY_UNWRITABLE','已选存档目录不可写，请检查目录权限后重试');}
     try {
       verifyBackup(game,policy);
       const presence=JSON.parse(readFile(presencePath(game,policy.backupId)).toString());

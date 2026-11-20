@@ -89,6 +89,44 @@ try {
   assert.throws(()=>unknown.service.inspect(unknown.game,unknown.state),e=>e.code==='SAVE_FORMAT_INVALID');
   const large=scenario('large');const largeFile=path.join(large.game.installPath,'fixture_save_sf.sav');fs.writeFileSync(largeFile,'');fs.truncateSync(largeFile,64*1024*1024+1);
   assert.throws(()=>large.service.inspect(large.game,large.state),e=>e.code==='SAVE_DIRECTORY_INVALID');
+  function checkSetLimit(name,count,largeFiles) {
+    const names=Array.from({length:count},(_,index)=>'fixture_save_'+String(index).padStart(3,'0')+'.sav');
+    const small=Buffer.from('{}'),large=largeFiles?Buffer.alloc(64*1024*1024,32):null;
+    if(large)large.write('{}');
+    const bytesFor=target=>{
+      const index=names.indexOf(path.basename(target));
+      return index<0?null:index<largeFiles?large:small;
+    };
+    const io=Object.assign({},fs,{
+      readdirSync:directory=>directory===fixture.game.installPath?names:fs.readdirSync(directory),
+      readFileSync:(target,...args)=>bytesFor(target)||fs.readFileSync(target,...args),
+      lstatSync:(target,...args)=>{
+        const bytes=bytesFor(target);
+        return bytes?{isFile:()=>true,isSymbolicLink:()=>false,nlink:1,size:bytes.length,ino:1,mtimeMs:0}:fs.lstatSync(target,...args);
+      }
+    });
+    const fixture=scenario(name,io,game=>{
+      const result=adapters.inspectSaveProfile(game);result.profile.fileNames=names;return result;
+    });
+    const before=JSON.stringify(fixture.state);
+    assert.throws(()=>fixture.service.inspect(fixture.game,fixture.state),e=>e.code==='SAVE_FORMAT_INVALID'&&e.message.includes('集合超过'));
+    assert.strictEqual(JSON.stringify(fixture.state),before);
+    assert(!fs.existsSync(fixture.context.dataRoot));
+  }
+  checkSetLimit('too-many-files',129,0);
+  checkSetLimit('too-many-bytes',5,4);
+
+  const replaced=scenario('replaced-directory');write(replaced.game,'resources',{progress:3});
+  replaced.game.savePolicy=apply(replaced,'resources');
+  const oldDirectory=path.join(replaced.game.installPath,'resources'),movedDirectory=oldDirectory+'.old';
+  const replacedName='fixture_save_sf.sav',oldData=fs.readFileSync(path.join(oldDirectory,replacedName));
+  const beforeReplacement=JSON.stringify(replaced.state);
+  fs.renameSync(oldDirectory,movedDirectory);fs.mkdirSync(oldDirectory);write(replaced.game,'resources',{progress:4});
+  const newData=fs.readFileSync(path.join(oldDirectory,replacedName));
+  assert.throws(()=>replaced.service.validate(replaced.game,replaced.state.library),e=>e.code==='SAVE_CONFIRM_REQUIRED');
+  assert.deepStrictEqual(fs.readFileSync(path.join(movedDirectory,replacedName)),oldData);
+  assert.deepStrictEqual(fs.readFileSync(path.join(oldDirectory,replacedName)),newData);
+  assert.strictEqual(JSON.stringify(replaced.state),beforeReplacement);
   const changed=scenario('changed');write(changed.game,'install',{progress:1});const changedScan=changed.service.inspect(changed.game,changed.state);
   assert.throws(()=>changed.service.apply(changed.game,{enabled:true,location:'install',scanToken:changedScan.scanToken},Object.assign({},changed.state,{token:'new-token'})),e=>e.code==='SAVE_SCAN_STALE');
   const disappeared=scenario('disappeared');write(disappeared.game,'install',{progress:1});const missingPolicy=apply(disappeared,'install');fs.unlinkSync(path.join(disappeared.game.installPath,'fixture_save_sf.sav'));

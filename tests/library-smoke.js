@@ -166,7 +166,12 @@ module.exports.runUI = async function (window, services) {
     const saveFixture=path.join(services.context.test,'save fixture 日本語');require('./save-hook-smoke').copy(path.join(root,'tests/fixtures/tyrano-save'),saveFixture);fs.mkdirSync(path.join(saveFixture,'resources'));
     const savePackage=JSON.parse(fs.readFileSync(path.join(saveFixture,'package.json')));savePackage.devDependencies.electron=process.versions.electron;savePackage.cpu=[process.arch];fs.writeFileSync(path.join(saveFixture,'package.json'),JSON.stringify(savePackage));
     const initialSave=escape(JSON.stringify({progress:10}));fs.writeFileSync(path.join(saveFixture,'fixture_save_sf.sav'),initialSave);
-    await run('reload()');await run("document.getElementById('add').click();document.getElementById('name').value='存档夹具';document.getElementById('install').value="+JSON.stringify(saveFixture)+";document.getElementById('inspect-saves').click()");
+    await run('reload()');await run("document.getElementById('add').click();document.getElementById('name').value='存档夹具';document.getElementById('install').value="+JSON.stringify(saveFixture));
+    await run("(async()=>{const scan=document.getElementById('inspect-saves').onclick();const field=document.getElementById('name');field.value+='已编辑';field.dispatchEvent(new Event('input'));await scan;})()");
+    assert.strictEqual(await run("document.querySelectorAll('[name=save-location]').length"),0,'Late first scan must not display the previous draft');
+    assert.strictEqual(await run("document.getElementById('save-enabled').disabled"),true);
+    assert.strictEqual(await run("document.getElementById('inspect-saves').disabled"),false);
+    await run("document.getElementById('name').value='存档夹具';document.getElementById('inspect-saves').click()");
     await wait("!document.getElementById('save-enabled').disabled");
     assert((await run("document.getElementById('save-help').textContent")).includes('读取和保存进度'));
     const beforeSaveCancel=fs.readFileSync(services.store.file);

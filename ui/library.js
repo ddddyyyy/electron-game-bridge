@@ -1,7 +1,7 @@
 const $=id=>document.getElementById(id);
 let state,selected=null,editingId=null,busy=false,saving=false,registering=false,returnFocus=null,runtimeFocus=null,resolutionSequence=0;
 let runtimeDownloading=false;
-let savePreview=null,saveDirty=false,saveBase=null,saveSequence=0;
+let savePreview=null,saveDirty=false,saveBase=null,saveSequence=0,saveScanPending=false;
 function message(text,error){$('message').textContent=text||'';$('message').classList.toggle('error',!!error);}
 function fail(error){message(error.message,true);$('fields-error').textContent=error.fieldErrors?Object.keys(error.fieldErrors).map(k=>k+'：'+error.fieldErrors[k]).join('\n'):error.message;}
 function current(){return state&&state.library&&state.library.games.find(g=>g&&g.id===selected);}
@@ -57,7 +57,8 @@ function setBusy(value){
   ['add','settings','nav-runtime'].forEach(id=>$(id).disabled=locked||bad||(id==='settings'&&!current()));
   $('launch').disabled=locked||bad||!selected;
   $('game-fields').disabled=locked;$('runtime-fields').disabled=locked;
-  ['save','inspect','open-runtime','inspect-saves','download-runtime'].forEach(id=>$(id).disabled=locked||bad);
+  ['save','inspect','open-runtime','download-runtime'].forEach(id=>$(id).disabled=locked||bad);
+  $('inspect-saves').disabled=locked||bad||saveScanPending;
   $('restore').disabled=locked;$('close-settings').disabled=saving||registering;$('cancel').disabled=saving||registering;$('close-runtime').disabled=registering;
 }
 function formGame(){
@@ -78,7 +79,7 @@ function openSettings(game,trigger){
   $('install').value=game?game.installPath:'';$('icon').value=game?game.iconPath||'':'';$('entry').value=game?game.entry:'.';$('cwd').value=game?game.workingDirectory:'.';$('args').value=game&&Array.isArray(game.args)?game.args.join('\n'):'';
   resetSaveForm(game);$('fields-error').textContent='';$('settings-panel').hidden=false;setBusy(busy);$('name').focus();resolve();
 }
-function closeSettings(){if(saving||registering)return;resolutionSequence++;saveSequence++;$('settings-panel').hidden=true;editingId=null;if(returnFocus&&document.contains(returnFocus))returnFocus.focus();}
+function closeSettings(){if(saving||registering)return;resolutionSequence++;saveSequence++;saveScanPending=false;$('settings-panel').hidden=true;editingId=null;if(returnFocus&&document.contains(returnFocus))returnFocus.focus();}
 function openRuntime(){if(busy||saving)return;runtimeFocus=document.activeElement;$('runtime-panel').hidden=false;renderRuntimes();$('runtime-path').focus();}
 function closeRuntime(){if(registering)return;$('runtime-panel').hidden=true;if(runtimeFocus)runtimeFocus.focus();if(!$('settings-panel').hidden)resolve();}
 async function reload(){try{accept(await window.launcher.readLibrary());}catch(error){fail(error);}}
@@ -158,21 +159,24 @@ function showSaveLocation(){
     candidate?candidate.displayPath:'尚未选择，请检查存档位置并选择一个文件夹。';
 }
 function resetSaveForm(game){
-  saveSequence++;savePreview=null;saveDirty=false;saveBase=game&&game.savePolicy;
+  saveSequence++;saveScanPending=false;savePreview=null;saveDirty=false;saveBase=game&&game.savePolicy;
   $('save-enabled').checked=!!saveBase;$('save-enabled').disabled=!saveBase;$('save-candidates').textContent='';$('save-status').textContent='';
   $('save-inspection').textContent=saveBase?'已启用指定位置，可重新检查并更换。':'先检查游戏是否支持指定存档位置。';
   showSaveLocation();
 }
 function invalidateSavePreview(){
-  if(!savePreview)return;savePreview=null;saveSequence++;
-  if($('save-enabled').checked)saveDirty=true;
+  if(!savePreview&&!saveScanPending)return;
+  if(savePreview&&$('save-enabled').checked)saveDirty=true;
+  savePreview=null;saveScanPending=false;saveSequence++;
   $('save-candidates').textContent='';$('save-inspection').textContent='设置已变化，请重新检查存档位置。';showSaveLocation();
+  setBusy(busy);
 }
 ['name','install','icon','entry','cwd','args'].forEach(id=>$(id).addEventListener('input',invalidateSavePreview));
 $('save-enabled').onchange=()=>{saveDirty=true;showSaveLocation();};
 $('inspect-saves').onclick=async()=>{
-  if(busy||saving||registering)return;const sequence=++saveSequence;
-  $('save-inspection').textContent='正在检查存档位置…';$('inspect-saves').disabled=true;
+  if(busy||saving||registering||saveScanPending)return;const sequence=++saveSequence;
+  saveScanPending=true;
+  $('save-inspection').textContent='正在检查存档位置…';setBusy(busy);
   try {
     const preview=await window.launcher.inspectSavePolicy({revision:state.library.revision,token:state.token,game:formGame()});
     if(sequence!==saveSequence||$('settings-panel').hidden)return;
@@ -186,7 +190,7 @@ $('inspect-saves').onclick=async()=>{
       const files=document.createElement('small');files.textContent=candidate.files.length?candidate.files.map(f=>f.name+' · '+new Date(f.mtime).toLocaleString()).join('\n'):'没有旧存档'+(candidate.exists?'':'（目录不存在）');text.append(files);label.append(radio,text);$('save-candidates').append(label);
     });
   }catch(error){if(sequence===saveSequence){savePreview=null;$('save-enabled').disabled=!saveBase;$('save-inspection').textContent=error.message;}}
-  finally{if(sequence===saveSequence){showSaveLocation();setBusy(busy);}}
+  finally{if(sequence===saveSequence){saveScanPending=false;showSaveLocation();setBusy(busy);}}
 };
 function saveChoice(){
   if(!saveDirty)return undefined;

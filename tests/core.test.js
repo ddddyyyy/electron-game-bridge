@@ -204,8 +204,22 @@ function remove(p) {
     const adaptedGame=Object.assign({},game,{id:'game-adapted',installPath:profileRoot});
     const adaptedLibrary={schemaVersion:2,revision:0,games:[adaptedGame],runtimes:[runtime]};
     const saveService=require('../core/save-policy').create(adaptedContext,{inspect:adapters.inspectSaveProfile,validate:adapters.validateSaveBytes});
+    const adaptedSave=path.join(profileRoot,'fixture_save_sf.sav'),adaptedBytes=Buffer.from(escape(JSON.stringify({progress:10})));
+    fs.writeFileSync(adaptedSave,adaptedBytes);
     const saveState={token:'unit',library:adaptedLibrary},saveScan=saveService.inspect(adaptedGame,saveState);
     adaptedGame.savePolicy=saveService.apply(adaptedGame,{enabled:true,location:'install',scanToken:saveScan.scanToken},saveState);adaptedContext.library=adaptedLibrary;
+    const access=fs.accessSync;
+    const readOnlyRunner=new launch.Runner(async()=>runtime,()=>assert.fail('Read-only save directory must block spawn'));
+    const originalPolicy=JSON.stringify(adaptedGame.savePolicy);
+    fs.accessSync=function(target,mode){
+      if(target===adaptedGame.savePolicy.directoryIdentity.realPath&&(mode&fs.constants.W_OK))throw Object.assign(Error('read-only'),{code:'EACCES'});
+      return access.apply(fs,arguments);
+    };
+    try{await assert.rejects(readOnlyRunner.start(adaptedGame,runtime,adaptedContext),e=>e.code==='SAVE_DIRECTORY_UNWRITABLE');}
+    finally{fs.accessSync=access;}
+    assert(!readOnlyRunner.busy);
+    assert.strictEqual(JSON.stringify(adaptedGame.savePolicy),originalPolicy);
+    assert.deepStrictEqual(fs.readFileSync(adaptedSave),adaptedBytes);
     const adaptedChild=new (require('events'))();adaptedChild.pid=456;adaptedChild.stdio=[null,null,null,new (require('stream').PassThrough)()];adaptedChild.kill=()=>{adaptedChild.killed=true;return true;};
     let adaptedSpawn;const adaptedRunner=new launch.Runner(async()=>runtime,(exe,argv,options)=>{adaptedSpawn={exe,argv,options};return adaptedChild;});
     const adaptedStages=[];adaptedRunner.on('state',v=>adaptedStages.push(v.phase));
@@ -219,6 +233,29 @@ function remove(p) {
     adaptedChild.stdio[3].write('x'.repeat(8193));assert(adaptedChild.killed);assert(adaptedRunner.busy,'Do not release busy before child exit');
     adaptedChild.emit('close',1,null);assert(!adaptedRunner.busy);assert.strictEqual(adaptedStages[adaptedStages.length-1],'failed');
     assert(!fs.existsSync(adaptedSpawn.options.env.LAUNCHER_SAVE_CONTEXT));
+    const unlink=fs.unlinkSync;
+    function failDescriptionCleanup(target){
+      if(/^launch-[a-f0-9]+\.json$/.test(path.basename(target)))throw Object.assign(Error('injected cleanup failure'),{code:'EACCES'});
+      return unlink.apply(fs,arguments);
+    }
+    try {
+      fs.unlinkSync=failDescriptionCleanup;
+      const rejected=new launch.Runner(async()=>runtime,()=>{throw Error('original spawn failure');});
+      const rejectedStates=[];rejected.on('state',value=>rejectedStates.push(value));
+      await assert.rejects(rejected.start(adaptedGame,runtime,adaptedContext),e=>e.message.includes('original spawn failure')&&e.message.includes('临时启动描述'));
+      assert(!rejected.busy);assert.strictEqual(rejectedStates.pop().phase,'failed');
+
+      const closing=new (require('events'))();closing.pid=789;closing.stdio=[null,null,null,new (require('stream').PassThrough)()];
+      const exitRunner=new launch.Runner(async()=>runtime,()=>closing);
+      const exitStates=[];exitRunner.on('state',value=>exitStates.push(value));
+      await exitRunner.start(adaptedGame,runtime,adaptedContext);
+      assert(exitRunner.busy);
+      closing.emit('close',1,null);
+      assert(!exitRunner.busy);assert.strictEqual(exitRunner.child,null);
+      const terminal=exitStates.pop();
+      assert.strictEqual(terminal.phase,'failed');assert.strictEqual(terminal.code,'SAVE_HOOK_FAILED');
+      assert(terminal.message.includes('存档适配未完成'));assert(terminal.message.includes('临时启动描述'));
+    } finally {fs.unlinkSync=unlink;}
     for(const fault of ['json','nonce','early-ready','eof','timeout']) {
       const eventChild=new (require('events'))();eventChild.pid=789;eventChild.stdio=[null,null,null,new (require('stream').PassThrough)()];eventChild.kill=()=>{eventChild.killed=true;return true;};
       let eventOptions;const eventRunner=new launch.Runner(async()=>runtime,(_exe,_argv,options)=>{eventOptions=options;return eventChild;});

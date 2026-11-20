@@ -193,7 +193,7 @@ Phase 6: (T036 + T037) → T038 → T039
 
 ## Phase 7: Convergence
 
-- [ ] T040 在 `core/save-policy.js` 的启动校验中复核已确认目录的写入条件，通过 `core/launch.js` 在启动子进程前报告不可写原因；在 `tests/save-policy.test.js` 或 `tests/core.test.js` 用已启用后变为只读的合成目录验证拒绝启动、原配置与存档保留，依据 FR-008 和权限变化边界场景（partial，HIGH）。
-- [ ] T041 修复 `core/launch.js` 临时启动描述删除失败的处理，保留原启动或适配错误并单独提示清理结果；子进程存活期间保留运行锁，实际退出后即使清理失败也释放锁并发送终态。用 `tests/core.test.js` 故障注入覆盖启动失败和子进程退出两条路径，依据 T020、FR-011（partial，HIGH）。
-- [ ] T042 在 `ui/library.js` 中使草稿变更立即作废仍在等待的存档扫描，丢弃旧响应和选择并让玩家可重新扫描；在 `tests/library-smoke.js` 验证首次扫描期间修改设置后，迟到结果不会展示旧候选或被用于提交，依据 T022（partial，MEDIUM）。
-- [ ] T043 在 `tests/save-policy.test.js` 增补扫描边界的合成断言，覆盖超过 128 个支持文件、集合超过 256 MiB，以及已确认目录被同路径新目录替换；验证明确拒绝且原存档和配置不变，可用替换的 profile 与 IO 避免创建大文件，依据 T011、FR-008（partial，LOW）。
+- [X] T040 在 `core/save-policy.js` 的启动校验中复核已确认目录的写入条件，通过 `core/launch.js` 在启动子进程前报告不可写原因；在 `tests/save-policy.test.js` 或 `tests/core.test.js` 用已启用后变为只读的合成目录验证拒绝启动、原配置与存档保留，依据 FR-008 和权限变化边界场景（partial，HIGH）。
+- [X] T041 修复 `core/launch.js` 临时启动描述删除失败的处理，保留原启动或适配错误并单独提示清理结果；子进程存活期间保留运行锁，实际退出后即使清理失败也释放锁并发送终态。用 `tests/core.test.js` 故障注入覆盖启动失败和子进程退出两条路径，依据 T020、FR-011（partial，HIGH）。
+- [X] T042 在 `ui/library.js` 中使草稿变更立即作废仍在等待的存档扫描，丢弃旧响应和选择并让玩家可重新扫描；在 `tests/library-smoke.js` 验证首次扫描期间修改设置后，迟到结果不会展示旧候选或被用于提交，依据 T022（partial，MEDIUM）。
+- [X] T043 在 `tests/save-policy.test.js` 增补扫描边界的合成断言，覆盖超过 128 个支持文件、集合超过 256 MiB，以及已确认目录被同路径新目录替换；验证明确拒绝且原存档和配置不变，可用替换的 profile 与 IO 避免创建大文件，依据 T011、FR-008（partial，LOW）。

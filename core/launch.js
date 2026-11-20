@@ -76,6 +76,14 @@ class Runner extends require('events') {
     if (this.busy) throw failure('ALREADY_RUNNING','已有游戏启动中或运行中');
     this.busy=true; this.state(game,'validating');
     let contextFile;
+    function cleanupDescription(message) {
+      if(!contextFile)return message;
+      try {fs.unlinkSync(contextFile);}
+      catch(error) {
+        if(error.code!=='ENOENT')return (message?message+'；':'')+'临时启动描述未能清理，请检查启动器数据目录权限';
+      }
+      return message;
+    }
     try {
       const { validateGame } = require('./config');
       const adapters = require('../adapters');
@@ -92,12 +100,13 @@ class Runner extends require('events') {
         const policies=require('./save-policy').create(context,{inspect:adapters.inspectSaveProfile,validate:adapters.validateSaveBytes});
         const verified=policies.validate(game,library);
         nonce=require('crypto').randomBytes(16).toString('hex');
-        contextFile=path.join(context.dataRoot,'games',game.id,'launch-'+nonce+'.json');
-        fs.mkdirSync(path.dirname(contextFile),{recursive:true,mode:0o700});
+        const target=path.join(context.dataRoot,'games',game.id,'launch-'+nonce+'.json');
+        fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});
         const ownedGame={id:game.id,installPath:game.installPath,entry:game.entry,adapterId:game.adapterId,savePolicy:game.savePolicy};
         const ownership={games:library.games.map(g=>({id:g&&g.id,savePolicy:g&&g.savePolicy?{directoryIdentity:g.savePolicy.directoryIdentity}:null}))};
         const value={version:1,gameId:game.id,nonce,profile:verified.profile,selectedDirectory:game.savePolicy.directoryIdentity.realPath,game:ownedGame,library:ownership,context:{dataRoot:context.dataRoot}};
-        const fd=fs.openSync(contextFile,'wx',0o600);
+        const fd=fs.openSync(target,'wx',0o600);
+        contextFile=target;
         try{fs.writeFileSync(fd,JSON.stringify(value));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
       }
       if(!fs.existsSync(descriptor.entry)) throw failure('ENTRY_UNAVAILABLE','游戏入口不存在：'+descriptor.entry);
@@ -122,8 +131,12 @@ class Runner extends require('events') {
       finally { fs.closeSync(log); }
       this.child=child;
       let finished=false,timer,failureDetails,ready=false,generation=0,pageBytes=0;
-      const cleanup=()=>{clearTimeout(timer);if(contextFile&&fs.existsSync(contextFile))fs.unlinkSync(contextFile);};
-      const done=(phase,details)=>{if(finished)return;finished=true;cleanup();this.busy=false;this.child=null;this.state(game,phase,details);};
+      const done=(phase,details)=>{
+        if(finished)return;
+        finished=true;clearTimeout(timer);
+        details.message=cleanupDescription(details.message);
+        this.busy=false;this.child=null;this.state(game,phase,details);
+      };
       const stop=(code,message)=>{
         if(failureDetails||finished)return;failureDetails={code,message};clearTimeout(timer);
         child.kill('SIGTERM');timer=setTimeout(()=>{if(!finished)child.kill('SIGKILL');},1000);
@@ -169,7 +182,10 @@ class Runner extends require('events') {
         }
       }else if(child.pid)this.state(game,'running',{pid:child.pid,message:'进程已启动（不代表完整游戏已验证）',version:actual.version,arch:actual.arch});
       return {gameId:game.id,phase:'starting',pid:child.pid,logPath};
-    } catch(error) { if(contextFile&&fs.existsSync(contextFile))fs.unlinkSync(contextFile);this.busy=false;this.state(game,'failed',{code:error.code||'LAUNCH_FAILED',message:error.message});throw error; }
+    } catch(error) {
+      error.message=cleanupDescription(error.message);
+      this.busy=false;this.state(game,'failed',{code:error.code||'LAUNCH_FAILED',message:error.message});throw error;
+    }
   }
 }
 Object.assign(module.exports,{ cleanEnv, inspectRuntime, Runner, removeTree });
